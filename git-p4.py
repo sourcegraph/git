@@ -3152,13 +3152,74 @@ class P4Sync(Command, P4UserMap):
 
                 fileArgs.append(fileArg)
 
-            p4CmdList(["-x", "-", "print"],
-                      stdin=fileArgs,
-                      cb=streamP4FilesCbSelf)
+            self.p4PrintFiles(fileArgs, streamP4FilesCbSelf)
+            # p4CmdList(["-x", "-", "print"],
+            #           stdin=fileArgs,
+            #           cb=streamP4FilesCbSelf)
 
             # do the last chunk
             if 'depotFile' in self.stream_file:
                 self.streamOneP4File(self.stream_file, self.stream_contents)
+
+    def p4PrintFiles(self, files=[], cb=None):
+        processes = {}
+        output = {}
+
+        for fname in files:
+            cmd = ["p4", "-G",  "print", fname]
+            print("Running command: {}".format(cmd))
+            stdout_file = tempfile.TemporaryFile(prefix='p4-stdout', mode='w+b')
+            p = subprocess.Popen(
+                cmd,
+                stdout=stdout_file,
+            )
+            
+            processes[fname] = p
+            output[fname] = stdout_file
+
+        # # wait for all the processes
+        # for fname, p in processes.items():
+        #     return_code = p.wait()
+        #     if return_code != 0:
+        #         raise P4Exception(return_code)
+        #     cmd = ["p4", "-G", "print", fname]
+        #     print("command {} done".format(cmd))
+
+        # print("all done")
+    
+        # loop over all the files in order
+        # and display their content
+        for fname in files:
+            return_code = processes[fname].wait()
+            if return_code != 0:
+                raise P4Exception(return_code)
+            cmd = ["p4", "-G", "print", fname]
+            print("command {} done".format(cmd))
+
+            output[fname].seek(0)
+
+            print("streaming file {} to git fast-commit".format(fname))
+            try:
+                while True:
+                    entry = marshal.load(output[fname])
+                    if bytes is not str:
+                        # Decode unmarshalled dict to use str keys and values, except for:
+                        #   - `data` which may contain arbitrary binary data
+                        #   - `depotFile[0-9]*`, `path`, or `clientFile` which may contain non-UTF8 encoded text
+                        decoded_entry = {}
+                        for key, value in entry.items():
+                            key = key.decode()
+                            if isinstance(value, bytes) and not (key in ('data', 'path', 'clientFile') or key.startswith('depotFile')):
+                                value = value.decode()
+                            decoded_entry[key] = value
+                        # Parse out data if it's an error response
+                        if decoded_entry.get('code') == 'error' and 'data' in decoded_entry:
+                            decoded_entry['data'] = decoded_entry['data'].decode()
+                        entry = decoded_entry
+                    cb(entry)
+            except EOFError:
+                pass
+        print("done here")
 
     def make_email(self, userid):
         if userid in self.users:
