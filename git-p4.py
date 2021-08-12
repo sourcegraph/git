@@ -35,6 +35,12 @@ import zlib
 import ctypes
 import errno
 import glob
+import threading
+import queue
+from timeit import default_timer as timer
+
+nb_process = 5
+nb_files_per_print = 200
 
 # On python2.7 where raw_input() and input() are both availble,
 # we want raw_input's semantics, but aliased to input for python3
@@ -3153,73 +3159,174 @@ class P4Sync(Command, P4UserMap):
                 fileArgs.append(fileArg)
 
             self.p4PrintFiles(fileArgs, streamP4FilesCbSelf)
-            # p4CmdList(["-x", "-", "print"],
-            #           stdin=fileArgs,
-            #           cb=streamP4FilesCbSelf)
 
             # do the last chunk
             if 'depotFile' in self.stream_file:
                 self.streamOneP4File(self.stream_file, self.stream_contents)
 
     def p4PrintFiles(self, files=[], cb=None):
-        processes = {}
-        output = {}
+        print("Start p4printFile")
 
-        for fname in files:
-            cmd = ["p4", "-G",  "print", fname]
-            print("Running command: {}".format(cmd))
-            stdout_file = tempfile.TemporaryFile(prefix='p4-stdout', mode='w+b')
-            p = subprocess.Popen(
+        print("file number", len(files))
+        if nb_process > 1:
+            q = queue.Queue(nb_process - 1)
+        else:
+            q = queue.Queue(1)
+
+        print("Queue size", q.maxsize)
+        exitThread = False
+
+        def stream():
+            print("Starting thread")
+            while True:
+                if q.empty() and exitThread:
+                    print("Exiting")
+                    return
+
+                try:
+                    task = q.get(timeout=0.5)
+                except queue.Empty:
+                    continue
+
+                print("waiting for task {} to end".format(task["id"]))
+                start = timer()
+
+                return_code = task["process"].wait()
+                if return_code != 0:
+                    raise Exception(return_code)
+                
+                print("process {} done in {}s".format(task["id"], timer() - start))
+
+                f = task["output"]
+                f.seek(0)            
+                print("streaming task {} to git fast-commit".format(task["id"]))
+                start = timer()
+                try:
+                    while True:
+                        entry = marshal.load(f)
+                        if bytes is not str:
+                            # Decode unmarshalled dict to use str keys and values, except for:
+                            #   - `data` which may contain arbitrary binary data
+                            #   - `depotFile[0-9]*`, `path`, or `clientFile` which may contain non-UTF8 encoded text
+                            decoded_entry = {}
+                            for key, value in entry.items():
+                                key = key.decode()
+                                if isinstance(value, bytes) and not (key in ('data', 'path', 'clientFile') or key.startswith('depotFile')):
+                                    value = value.decode()
+                                decoded_entry[key] = value
+                            # Parse out data if it's an error response
+                            if decoded_entry.get('code') == 'error' and 'data' in decoded_entry:
+                                decoded_entry['data'] = decoded_entry['data'].decode()
+                            entry = decoded_entry
+                        cb(entry)
+                except EOFError:
+                    pass
+                f.close()
+                q.task_done()
+                print("streaming task {} done in {}s".format(task["id"], timer() - start))
+
+        # start the thread
+        t = threading.Thread(target=stream, daemon=True)
+        t.start()
+
+        tasks = []
+        i = 1
+        while len(files) > 0:
+            # take at most nb_files_per_print elements from the list
+            if len(files) > nb_files_per_print:
+                chunk = files[:nb_files_per_print]
+                files = files[nb_files_per_print:]
+            else:
+                chunk = files
+                files = []
+
+            task = {
+                "id": i,
+            }
+            tasks.append(task)
+
+            # create a temporary file to store p4 print output
+            print("processing task {} with chunk size {}".format(task["id"], len(chunk)))
+            task["output"] = tempfile.TemporaryFile(prefix='p4-stdout', mode='w+b')
+
+            cmd = ["p4", "-G", "print"]
+            cmd.extend(chunk)
+            # run p4 print
+            task["process"] = subprocess.Popen(
                 cmd,
-                stdout=stdout_file,
+                stdout=task["output"],
             )
+
+            q.put(task)
+
+            i += 1
+
+        exitThread = True
+
+        # Wait for the thread to complete
+        # thread.join()
+        t.join()
+        # print("done here")
+
+    # def p4PrintFiles(self, files=[], cb=None):
+    #     processes = {}
+    #     output = {}
+
+    #     for fname in files:
+    #         cmd = ["p4", "-G",  "print", fname]
+    #         print("Running command: {}".format(cmd))
+    #         stdout_file = tempfile.TemporaryFile(prefix='p4-stdout', mode='w+b')
+    #         p = subprocess.Popen(
+    #             cmd,
+    #             stdout=stdout_file,
+    #         )
             
-            processes[fname] = p
-            output[fname] = stdout_file
+    #         processes[fname] = p
+    #         output[fname] = stdout_file
 
-        # # wait for all the processes
-        # for fname, p in processes.items():
-        #     return_code = p.wait()
-        #     if return_code != 0:
-        #         raise P4Exception(return_code)
-        #     cmd = ["p4", "-G", "print", fname]
-        #     print("command {} done".format(cmd))
+    #     # # wait for all the processes
+    #     # for fname, p in processes.items():
+    #     #     return_code = p.wait()
+    #     #     if return_code != 0:
+    #     #         raise P4Exception(return_code)
+    #     #     cmd = ["p4", "-G", "print", fname]
+    #     #     print("command {} done".format(cmd))
 
-        # print("all done")
+    #     # print("all done")
     
-        # loop over all the files in order
-        # and display their content
-        for fname in files:
-            return_code = processes[fname].wait()
-            if return_code != 0:
-                raise P4Exception(return_code)
-            cmd = ["p4", "-G", "print", fname]
-            print("command {} done".format(cmd))
+    #     # loop over all the files in order
+    #     # and display their content
+    #     for fname in files:
+    #         return_code = processes[fname].wait()
+    #         if return_code != 0:
+    #             raise P4Exception(return_code)
+    #         cmd = ["p4", "-G", "print", fname]
+    #         print("command {} done".format(cmd))
 
-            output[fname].seek(0)
+    #         output[fname].seek(0)
 
-            print("streaming file {} to git fast-commit".format(fname))
-            try:
-                while True:
-                    entry = marshal.load(output[fname])
-                    if bytes is not str:
-                        # Decode unmarshalled dict to use str keys and values, except for:
-                        #   - `data` which may contain arbitrary binary data
-                        #   - `depotFile[0-9]*`, `path`, or `clientFile` which may contain non-UTF8 encoded text
-                        decoded_entry = {}
-                        for key, value in entry.items():
-                            key = key.decode()
-                            if isinstance(value, bytes) and not (key in ('data', 'path', 'clientFile') or key.startswith('depotFile')):
-                                value = value.decode()
-                            decoded_entry[key] = value
-                        # Parse out data if it's an error response
-                        if decoded_entry.get('code') == 'error' and 'data' in decoded_entry:
-                            decoded_entry['data'] = decoded_entry['data'].decode()
-                        entry = decoded_entry
-                    cb(entry)
-            except EOFError:
-                pass
-        print("done here")
+    #         print("streaming file {} to git fast-commit".format(fname))
+    #         try:
+    #             while True:
+    #                 entry = marshal.load(output[fname])
+    #                 if bytes is not str:
+    #                     # Decode unmarshalled dict to use str keys and values, except for:
+    #                     #   - `data` which may contain arbitrary binary data
+    #                     #   - `depotFile[0-9]*`, `path`, or `clientFile` which may contain non-UTF8 encoded text
+    #                     decoded_entry = {}
+    #                     for key, value in entry.items():
+    #                         key = key.decode()
+    #                         if isinstance(value, bytes) and not (key in ('data', 'path', 'clientFile') or key.startswith('depotFile')):
+    #                             value = value.decode()
+    #                         decoded_entry[key] = value
+    #                     # Parse out data if it's an error response
+    #                     if decoded_entry.get('code') == 'error' and 'data' in decoded_entry:
+    #                         decoded_entry['data'] = decoded_entry['data'].decode()
+    #                     entry = decoded_entry
+    #                 cb(entry)
+    #         except EOFError:
+    #             pass
+    #     print("done here")
 
     def make_email(self, userid):
         if userid in self.users:
@@ -3369,7 +3476,11 @@ class P4Sync(Command, P4UserMap):
                 print("parent %s" % parent)
             self.gitStream.write("from %s\n" % parent)
 
+        print("Start")
+        start = timer()
         self.streamP4Files(files)
+        end = timer()
+        print("Elapsed", end - start)
         self.gitStream.write("\n")
 
         change = int(details["change"])
