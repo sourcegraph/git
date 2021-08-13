@@ -3187,30 +3187,32 @@ class P4Sync(Command, P4UserMap):
                 except queue.Empty:
                     continue
 
+                task_id = task["id"]
+                chunk = task["chunk"]
                 # create a temporary file to store p4 print output
-                print("processing task {} with chunk size {}".format(task["id"], len(chunk)))
-                task["output"] = tempfile.TemporaryFile(prefix='p4-stdout', mode='w+b')
+                print("processing task {} with chunk size {}".format(task_id, len(chunk)))
+                output = tempfile.TemporaryFile(prefix='p4-stdout', mode='w+b')
 
                 # run p4 print
                 cmd = ["p4", "-G", "print"]
                 cmd.extend(chunk)
                 p = subprocess.Popen(
                     cmd,
-                    stdout=task["output"],
+                    stdout=output,
                 )
 
-                print("waiting for task {} to end".format(task["id"]))
+                print("waiting for task {} to end".format(task_id))
                 start = timer()
 
                 return_code = p.wait()
                 if return_code != 0:
                     raise Exception(return_code)
                 
-                print("process {} done in {}s".format(task["id"], timer() - start))
+                print("process {} done in {}s".format(task_id, timer() - start))
 
-                f = task["output"]
+                f = output
                 f.seek(0)            
-                print("streaming task {} to git fast-commit".format(task["id"]))
+                print("streaming task {} to git fast-commit".format(task_id))
                 start = timer()
                 lock.acquire()
                 try:
@@ -3236,7 +3238,7 @@ class P4Sync(Command, P4UserMap):
                 lock.release()
                 f.close()
                 q.task_done()
-                print("streaming task {} done in {}s".format(task["id"], timer() - start))
+                print("streaming task {} done in {}s".format(task_id, timer() - start))
 
         # start the thread
         threads = []
