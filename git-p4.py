@@ -37,10 +37,11 @@ import errno
 import glob
 import threading
 import queue
+import io
 from timeit import default_timer as timer
 
-nb_process = 5
-nb_files_per_print = 200
+nb_process = 10
+nb_files_per_print = 100
 
 # On python2.7 where raw_input() and input() are both availble,
 # we want raw_input's semantics, but aliased to input for python3
@@ -3193,12 +3194,13 @@ class P4Sync(Command, P4UserMap):
                 print("processing task {} with chunk size {}".format(task_id, len(chunk)))
                 output = tempfile.TemporaryFile(prefix='p4-stdout', mode='w+b')
 
+                f = io.BufferedRandom(output, 10_000)
                 # run p4 print
                 cmd = ["p4", "-G", "print"]
                 cmd.extend(chunk)
                 p = subprocess.Popen(
                     cmd,
-                    stdout=output,
+                    stdout=f,
                 )
 
                 print("waiting for task {} to end".format(task_id))
@@ -3210,8 +3212,7 @@ class P4Sync(Command, P4UserMap):
                 
                 print("process {} done in {}s".format(task_id, timer() - start))
 
-                f = output
-                f.seek(0)            
+                f.seek(0)
                 print("streaming task {} to git fast-commit".format(task_id))
                 start = timer()
                 lock.acquire()
