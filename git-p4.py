@@ -3168,15 +3168,14 @@ class P4Sync(Command, P4UserMap):
         print("Start p4printFile")
 
         print("file number", len(files))
-        if nb_process > 1:
-            q = queue.Queue(nb_process - 1)
-        else:
-            q = queue.Queue(1)
+        q = queue.Queue()
 
         print("Queue size", q.maxsize)
         exitThread = False
 
-        def stream():
+        lock = threading.Lock()
+
+        def worker():
             print("Starting thread")
             while True:
                 if q.empty() and exitThread:
@@ -3188,10 +3187,22 @@ class P4Sync(Command, P4UserMap):
                 except queue.Empty:
                     continue
 
+                # create a temporary file to store p4 print output
+                print("processing task {} with chunk size {}".format(task["id"], len(chunk)))
+                task["output"] = tempfile.TemporaryFile(prefix='p4-stdout', mode='w+b')
+
+                # run p4 print
+                cmd = ["p4", "-G", "print"]
+                cmd.extend(chunk)
+                p = subprocess.Popen(
+                    cmd,
+                    stdout=task["output"],
+                )
+
                 print("waiting for task {} to end".format(task["id"]))
                 start = timer()
 
-                return_code = task["process"].wait()
+                return_code = p.wait()
                 if return_code != 0:
                     raise Exception(return_code)
                 
@@ -3201,6 +3212,7 @@ class P4Sync(Command, P4UserMap):
                 f.seek(0)            
                 print("streaming task {} to git fast-commit".format(task["id"]))
                 start = timer()
+                lock.acquire()
                 try:
                     while True:
                         entry = marshal.load(f)
@@ -3221,15 +3233,18 @@ class P4Sync(Command, P4UserMap):
                         cb(entry)
                 except EOFError:
                     pass
+                lock.release()
                 f.close()
                 q.task_done()
                 print("streaming task {} done in {}s".format(task["id"], timer() - start))
 
         # start the thread
-        t = threading.Thread(target=stream, daemon=True)
-        t.start()
+        threads = []
+        for i in range (0, nb_process):
+            t = threading.Thread(target=worker)
+            t.start()
+            threads.append(t)
 
-        tasks = []
         i = 1
         while len(files) > 0:
             # take at most nb_files_per_print elements from the list
@@ -3242,21 +3257,9 @@ class P4Sync(Command, P4UserMap):
 
             task = {
                 "id": i,
+                "chunk": chunk,
             }
-            tasks.append(task)
-
-            # create a temporary file to store p4 print output
-            print("processing task {} with chunk size {}".format(task["id"], len(chunk)))
-            task["output"] = tempfile.TemporaryFile(prefix='p4-stdout', mode='w+b')
-
-            cmd = ["p4", "-G", "print"]
-            cmd.extend(chunk)
-            # run p4 print
-            task["process"] = subprocess.Popen(
-                cmd,
-                stdout=task["output"],
-            )
-
+            
             q.put(task)
 
             i += 1
@@ -3265,8 +3268,10 @@ class P4Sync(Command, P4UserMap):
 
         # Wait for the thread to complete
         # thread.join()
-        t.join()
-        # print("done here")
+        # Wait for the threads to complete
+        for t in threads:
+            t.join()
+        print("done here")
 
     # def p4PrintFiles(self, files=[], cb=None):
     #     processes = {}
