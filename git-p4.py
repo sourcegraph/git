@@ -42,6 +42,7 @@ from timeit import default_timer as timer
 
 nb_process = 10
 nb_files_per_print = 100
+check_disk_free = False
 
 # On python2.7 where raw_input() and input() are both availble,
 # we want raw_input's semantics, but aliased to input for python3
@@ -53,7 +54,7 @@ try:
 except:
     pass
 
-verbose = False
+verbose = True
 
 # Only labels/tags matching this will be imported/exported
 defaultLabelRegexp = r'[a-zA-Z0-9_\-.]+$'
@@ -3068,7 +3069,8 @@ class P4Sync(Command, P4UserMap):
                 if "data" in marshalled:
                     err = marshalled["data"].rstrip()
 
-        if not err and 'fileSize' in self.stream_file:
+        if not err and 'fileSize' and check_disk_free in self.stream_file:
+            # TODO (Dax): calcDiskFree is very expensive, need to limit number of calls
             required_bytes = int((4 * int(self.stream_file["fileSize"])) - calcDiskFree())
             if required_bytes > 0:
                 err = 'Not enough space left on %s! Free at least %i MB.' % (
@@ -3269,8 +3271,6 @@ class P4Sync(Command, P4UserMap):
 
         exitThread = True
 
-        # Wait for the thread to complete
-        # thread.join()
         # Wait for the threads to complete
         for t in threads:
             t.join()
