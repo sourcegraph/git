@@ -3716,7 +3716,7 @@ class P4Sync(Command, P4UserMap):
 
                 lock.acquire()
                 downloaded += 1
-                printProgress()
+                # printProgress()
                 lock.release()
     
                 out.put_nowait({
@@ -3739,6 +3739,7 @@ class P4Sync(Command, P4UserMap):
                 if commited < len(changes):
                     try:
                         task = out.get(timeout=0.5)
+                        print("downloaded: change {} downloaded".format(task["change"]))
                     except queue.Empty:
                         continue
 
@@ -3748,14 +3749,17 @@ class P4Sync(Command, P4UserMap):
                     try:
                         toCommit = done.pop(changes[commited])
                     except KeyError:
+                        print("committer: waiting for {}".format(changes[commited]))
                         break
-                    
+
                     self.commit(toCommit["description"], toCommit["files"], self.branch,
                                 self.initialParent, localPath=toCommit["filePath"])
                     
+                    print("committer: {} committed, ".format(changes[commited]))
                     lock.acquire()
                     commited += 1
-                    printProgress()
+                    print("committer: Downloaded: %s / %s, Committed: %s / %s" % (downloaded, len(changes), commited, len(changes)))
+                    # printProgress()
                     lock.release()
 
         # start the commit downloader threads
