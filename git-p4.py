@@ -38,6 +38,8 @@ import glob
 import queue
 import threading
 import logging
+import pathlib
+
 
 # On python2.7 where raw_input() and input() are both availble,
 # we want raw_input's semantics, but aliased to input for python3
@@ -2785,6 +2787,8 @@ class P4Sync(Command, P4UserMap):
                 optparse.make_option("--threads", dest="threads", type="int"),
                 optparse.make_option("--print-batch-size", dest="printBatchSize", type="int"),
                 optparse.make_option("--describe-batch-size", dest="describeBatchSize", type="int"),
+                optparse.make_option("--tmp-dir", dest="tmpDir", help="Directory to store temporary files")
+                
         ]
         self.description = """Imports from Perforce into a git repository.\n
     example:
@@ -2821,6 +2825,7 @@ class P4Sync(Command, P4UserMap):
         self.threads = 10
         self.printBatchSize = 1000
         self.describeBatchSize = 1000
+        self.tmpDir = ""
 
         if gitConfig('git-p4.largeFileSystem'):
             largeFileSystemConstructor = globals()[gitConfig('git-p4.largeFileSystem')]
@@ -3687,11 +3692,14 @@ class P4Sync(Command, P4UserMap):
             self.threads = 1
 
         # create a temporary directory to store p4 changes as files
-        tempDir = tempfile.TemporaryDirectory()
-        
+        tempDir = None
+        if self.tmpDir == "":
+            tempDir = tempfile.TemporaryDirectory()
+        else:
+            pathlib.Path(self.tmpDir).mkdir(parents=True, exist_ok=True)
+
         # printQ is used to run p4 print commands concurrently.
         printQ = queue.Queue(1)
-
         # commitQ is used by workers to commit files.
         commitQ = queue.Queue(1)
 
@@ -3876,8 +3884,9 @@ class P4Sync(Command, P4UserMap):
         logit("threads released")
 
         # cleanup the temp directory
-        tempDir.cleanup()
-        logit("temp directory cleaned up")
+        if self.tmpDir == "":
+            tempDir.cleanup()
+            logit("temp directory cleaned up")
 
     def importChanges(self, changes, origin_revision=0):
         cnt = 1
