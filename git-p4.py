@@ -3672,9 +3672,9 @@ class P4Sync(Command, P4UserMap):
         downloaded = 0
         commited = 0
 
-        threads = self.threads - 1
-        if threads < 2:
-            threads = 2
+        self.threads = self.threads - 1
+        if self.threads < 2:
+            self.threads = 2
 
         def printProgress():
             sys.stdout.write("\rDownloaded: %s / %s, Committed: %s / %s" % (downloaded, len(changes), commited, len(changes)))
