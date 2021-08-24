@@ -37,6 +37,8 @@ import errno
 import glob
 import queue
 import threading
+from pathlib import Path
+
 
 # On python2.7 where raw_input() and input() are both availble,
 # we want raw_input's semantics, but aliased to input for python3
@@ -2765,6 +2767,7 @@ class P4Sync(Command, P4UserMap):
                                      action="callback", callback=cloneExcludeCallback, type="string",
                                      help="exclude depot path"),
                 optparse.make_option("--threads", dest="threads", type="int"),
+                optparse.make_option("--cache-dir", dest="cacheDir", help="Directory to store temporary files")
                 
         ]
         self.description = """Imports from Perforce into a git repository.\n
@@ -2800,6 +2803,7 @@ class P4Sync(Command, P4UserMap):
         self.largeFileSystem = None
         self.suppress_meta_comment = False
         self.threads = 10
+        self.cacheDir= ""
 
         if gitConfig('git-p4.largeFileSystem'):
             largeFileSystemConstructor = globals()[gitConfig('git-p4.largeFileSystem')]
@@ -3655,8 +3659,17 @@ class P4Sync(Command, P4UserMap):
 
     def importChangesInParallel(self, changes):
         # create a temporary directory to store p4 changes as files
-        tempDir = tempfile.TemporaryDirectory()
-        
+        cacheDir = self.cacheDir
+        persist_dir = False
+
+        if cacheDir == "":
+          global tempDir
+          tempDir = tempfile.TemporaryDirectory()
+          cacheDir = tempDir.name
+        else:
+          Path(cacheDir).mkdir(parents=True, exist_ok=True)
+          persist_dir = True
+                
         # q is used to distribute each change to the worker pool
         q = queue.Queue(1)
 
@@ -3681,7 +3694,7 @@ class P4Sync(Command, P4UserMap):
             sys.stdout.flush()
     
         # thread responsible for downloading commits one by one
-        # and write them to a file in the tempDir directory.
+        # and write them to a file in the cacheDir directory.
         # each file will be named <change number>.txt and contain
         # the raw input of the "p4 -G -x - print" command.
         # Once the file is created, it is closed and the path
@@ -3704,9 +3717,8 @@ class P4Sync(Command, P4UserMap):
 
                 files = self.extractFilesFromCommit(description)
                 fileArgs = self.prepFileArgs(files)
-
-                path = "{}/{}.txt".format(tempDir.name, change)
-
+                
+                path = "{}/{}.txt".format(cacheDir, change)
                 with open(path, 'w+b') as stdoutFile:
                     p4 = buildP4ListCmd(["-x", "-", "print"],
                         stdin=fileArgs,
@@ -3725,7 +3737,7 @@ class P4Sync(Command, P4UserMap):
                     "description": description,
                     "files": files,
                 })
-
+           
         # run as a single thread and responsible for creating commits.
         # it reads from the "out" queue and ensures commits are created in order.
         def commiter():
@@ -3785,7 +3797,8 @@ class P4Sync(Command, P4UserMap):
             t.join()
         
         # cleanup the temp directory
-        tempDir.cleanup()
+        if not persist_dir:
+         tempDir.cleanup()
 
     def importChanges(self, changes, origin_revision=0):
         cnt = 1
