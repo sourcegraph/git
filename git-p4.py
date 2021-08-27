@@ -37,6 +37,7 @@ import errno
 import glob
 import queue
 import threading
+import logging
 
 # On python2.7 where raw_input() and input() are both availble,
 # we want raw_input's semantics, but aliased to input for python3
@@ -49,6 +50,11 @@ except:
     pass
 
 verbose = False
+
+logging.basicConfig(
+    format='%(asctime)s %(levelname)-8s %(message)s',
+    level=logging.INFO,
+    datefmt='%Y-%m-%d %H:%M:%S')
 
 # Only labels/tags matching this will be imported/exported
 defaultLabelRegexp = r'[a-zA-Z0-9_\-.]+$'
@@ -2765,7 +2771,7 @@ class P4Sync(Command, P4UserMap):
                                      action="callback", callback=cloneExcludeCallback, type="string",
                                      help="exclude depot path"),
                 optparse.make_option("--threads", dest="threads", type="int"),
-                
+                optparse.make_option("--print-batch-size", dest="printBatchSize", type="int"),
         ]
         self.description = """Imports from Perforce into a git repository.\n
     example:
@@ -2800,6 +2806,7 @@ class P4Sync(Command, P4UserMap):
         self.largeFileSystem = None
         self.suppress_meta_comment = False
         self.threads = 10
+        self.printBatchSize = 10
 
         if gitConfig('git-p4.largeFileSystem'):
             largeFileSystemConstructor = globals()[gitConfig('git-p4.largeFileSystem')]
@@ -3165,8 +3172,14 @@ class P4Sync(Command, P4UserMap):
                 fileArgs.append(fileArg)
 
             if localPath:
-                with open(localPath, 'r+b') as f:
-                    unmarshalp4Output(f, cb=streamP4FilesCbSelf)
+                if localPath.endswith(".txt"):
+                    with open(localPath, 'r+b') as f:
+                        unmarshalp4Output(f, cb=streamP4FilesCbSelf)
+                else:
+                    for fname in os.listdir(localPath):
+                        with open(os.path.join(localPath, fname), 'r+b') as f:
+                            unmarshalp4Output(f, cb=streamP4FilesCbSelf)
+
             else:
                 p4CmdList(["-x", "-", "print"],
                       stdin=fileArgs,
@@ -3654,16 +3667,24 @@ class P4Sync(Command, P4UserMap):
         return None
 
     def importChangesInParallel(self, changes):
+        self.threads = self.threads - 1
+        if self.threads < 2:
+            self.threads = 2
+
         # create a temporary directory to store p4 changes as files
         tempDir = tempfile.TemporaryDirectory()
         
-        # q is used to distribute each change to the worker pool
-        q = queue.Queue(1)
+        # taskQ is used to distribute work to threads
+        # a task can either be a p4 CL or a list of files to print.
+        # files will always have a higher priority than CLs
+        taskQ = queue.PriorityQueue(self.threads)
 
-        # whenever a worker has finished downloading
-        # a commit, it will send it to this queue.
-        # this queue must never block
-        out = queue.Queue(len(changes))
+        # workers will write the result of the p4 describe command to this queue
+        describedQ = queue.Queue(1)
+
+        # whenever a worker has finished running p4 print
+        # it will send it to this queue.
+        printedQ = queue.Queue(self.threads)
 
         exitThread = False
 
@@ -3672,59 +3693,61 @@ class P4Sync(Command, P4UserMap):
         downloaded = 0
         commited = 0
 
-        threads = self.threads - 1
-        if threads < 2:
-            threads = 2
+        def logit(*args, **kwargs):
+            logging.info(*args, **kwargs)
 
-        def printProgress():
-            sys.stdout.write("\rDownloaded: %s / %s, Committed: %s / %s" % (downloaded, len(changes), commited, len(changes)))
-            sys.stdout.flush()
-    
         # thread responsible for downloading commits one by one
         # and write them to a file in the tempDir directory.
         # each file will be named <change number>.txt and contain
         # the raw input of the "p4 -G -x - print" command.
         # Once the file is created, it is closed and the path
         # is pushed to the "out" queue 
-        def commitDownloader():
+        def worker():
             nonlocal downloaded, commited, exitThread
             while True:
-                if q.empty() and exitThread:
+                if exitThread:
                     return
 
                 try:
-                    change = q.get(timeout=0.5)
+                    _, _, _, task = taskQ.get(timeout=0.1)
                 except queue.Empty:
                     continue
 
-                description = p4_describe(change)
-                lock.acquire()
-                self.updateOptionDict(description)
-                lock.release()
+                if task["type"] == "describe":
+                    logit("CL {}>: {} ({})".format(task["change"], task["type"], threading.current_thread().name))
+                    description = p4_describe(task["change"])
+                    lock.acquire()
+                    self.updateOptionDict(description)
+                    lock.release()
 
-                files = self.extractFilesFromCommit(description)
-                fileArgs = self.prepFileArgs(files)
+                    files = self.extractFilesFromCommit(description)
+                    fileArgs = self.prepFileArgs(files)
 
-                path = "{}/{}.txt".format(tempDir.name, change)
+                    describedQ.put({"files": files, "fileArgs": fileArgs, "change": task["change"], "description": description})
+                    taskQ.task_done()
+                    continue
 
-                with open(path, 'w+b') as stdoutFile:
-                    p4 = buildP4ListCmd(["-x", "-", "print"],
-                        stdin=fileArgs,
-                        stdout=stdoutFile)
+                if task["type"] == "print":
+                    logit("CL {}>: {} {}/{} ({})".format(task["change"], task["type"], task["chunkId"], task["totalChunks"], threading.current_thread().name))
+                    path = os.path.join(task["dir"], str(task["chunkId"]) + ".txt")
+                    with open(path, 'w+b') as stdoutFile:
+                        p4 = buildP4ListCmd(["-x", "-", "print"],
+                            stdin=task["fileArgs"],
+                            stdout=stdoutFile)
 
-                    p4.wait()
+                        p4.wait()
 
-                lock.acquire()
-                downloaded += 1
-                # printProgress()
-                lock.release()
-    
-                out.put_nowait({
-                    "change": change,
-                    "filePath": path,
-                    "description": description,
-                    "files": files,
-                })
+                    printedQ.put({
+                        "change": task["change"],
+                        "path": path,
+                        "description": task["description"],
+                        "files": task["files"],
+                        "fileArgs": task["fileArgs"],
+                        "dir": task["dir"],
+                        "totalChunks": task["totalChunks"]
+                    })
+                    taskQ.task_done()
+                
 
         # run as a single thread and responsible for creating commits.
         # it reads from the "out" queue and ensures commits are created in order.
@@ -3733,39 +3756,57 @@ class P4Sync(Command, P4UserMap):
 
             done = {}
             while True:
-                if out.empty() and exitThread and commited >= len(changes):
+                if exitThread:
                     return
 
                 if commited < len(changes):
                     try:
-                        task = out.get(timeout=0.5)
-                        print("downloaded: change {} downloaded".format(task["change"]))
+                        task = printedQ.get(timeout=0.5)
+                        logit("CL {}>: downloaded (committer)".format(task["change"]))
                     except queue.Empty:
                         continue
 
-                    done[task["change"]] = task
+                    cl = done.get(task["change"])
+                    if cl is None:
+                        cl = {
+                            "description": task["description"],
+                            "files": task["files"],
+                            "fileArgs": task["fileArgs"],
+                            "dir": task["dir"],
+                            "chunkCount": 0,
+                            "complete": False,
+                        }
+                        done[task["change"]] = cl
+
+                    cl["chunkCount"] += 1
+                    printedQ.task_done()
+
+                    if cl["chunkCount"] < task["totalChunks"]:
+                        continue
+
+                    cl["complete"] = True
+                    logit("CL {}>: received all chunks (committer)".format(task["change"]))
+
+                downloaded += 1
 
                 while commited < len(changes):
-                    try:
-                        toCommit = done.pop(changes[commited])
-                    except KeyError:
-                        print("committer: waiting for {}".format(changes[commited]))
+                    toCommit = done.get(changes[commited])
+                    if toCommit is None or toCommit["complete"] is False:
+                        logit("CL {}>: waiting".format(changes[commited]))
                         break
 
                     self.commit(toCommit["description"], toCommit["files"], self.branch,
-                                self.initialParent, localPath=toCommit["filePath"])
+                                self.initialParent, localPath=toCommit["dir"])
                     
-                    print("committer: {} committed, ".format(changes[commited]))
-                    lock.acquire()
+                    done.pop(changes[commited])
+                    logit("CL {}>: committed".format(changes[commited]))
                     commited += 1
-                    print("committer: Downloaded: %s / %s, Committed: %s / %s" % (downloaded, len(changes), commited, len(changes)))
-                    # printProgress()
-                    lock.release()
+                    logit("committer: Downloaded: %s / %s, Committed: %s / %s" % (downloaded, len(changes), commited, len(changes)))
 
         # start the commit downloader threads
         threads = []
-        for i in range (0, self.threads - 1):
-            t = threading.Thread(target=commitDownloader)
+        for i in range (0, self.threads):
+            t = threading.Thread(target=worker)
             t.start()
             threads.append(t)
 
@@ -3775,8 +3816,82 @@ class P4Sync(Command, P4UserMap):
         threads.append(t)
 
         # send the list of changes to q
-        for change in changes:
-            q.put(change)
+        i = 0
+        clDescription = None
+        while not exitThread:
+            try:
+                clDescription = describedQ.get_nowait()
+            except queue.Empty:
+                pass
+
+            if clDescription is not None:
+                logit("CL {}>: generating chunks from {} files".format(clDescription["change"], len(clDescription["fileArgs"])))
+                fileArgs = clDescription["fileArgs"]
+                dir = "{}/{}".format(tempDir.name, clDescription["change"])
+                if not os.path.isdir(dir):
+                    os.mkdir(dir)
+    
+                chunkID = 1
+                
+                if len(fileArgs) % self.printBatchSize == 0:
+                    totalChunks = len(fileArgs) // self.printBatchSize
+                else:
+                    totalChunks = len(fileArgs) // self.printBatchSize + 1
+
+                while len(fileArgs) >= 0:
+                    # take at most self.printBatchSize elements from the list
+                    if len(fileArgs) > self.printBatchSize:
+                        chunk = fileArgs[:self.printBatchSize]
+                        fileArgs = fileArgs[self.printBatchSize:]
+                    else:
+                        chunk = fileArgs
+                        fileArgs = []
+
+                    task = {
+                        "type": "print",
+                        "change": clDescription["change"],
+                        "description": clDescription["description"],
+                        "chunk": chunk,
+                        "files": clDescription["files"],
+                        "fileArgs": clDescription["fileArgs"],
+                        "dir": dir,
+                        "chunkId": chunkID,
+                        "totalChunks": totalChunks,
+                    }
+
+                    logit("CL {}>: creating chunk {} / {} from {} files".format(
+                        clDescription["change"],
+                        chunkID,
+                        totalChunks,
+                        len(clDescription["fileArgs"])))
+                    taskQ.put((1, clDescription["change"], chunkID, task))
+                    
+                    chunkID += 1
+
+                    if len(fileArgs) == 0:
+                        break
+
+                clDescription = None
+                continue
+
+            if i >= len(changes):
+                lock.acquire()
+                if commited >= len(changes):
+                    exitThread = True
+                lock.release()
+                if exitThread:
+                    taskQ.join()
+                continue
+
+            try:
+                task = {
+                    "type": "describe",
+                    "change": changes[i],
+                }
+                taskQ.put((2, changes[i], 0, task), timeout=0.1)
+                i += 1
+            except queue.Full:
+                pass
 
         # signal the threads that there is no work done
         # and wait for them to finish
