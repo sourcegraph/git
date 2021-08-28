@@ -3710,35 +3710,32 @@ class P4Sync(Command, P4UserMap):
         # Once the file is created, it is closed and the path
         # is pushed to the "out" queue 
         def worker():
-            while True:
-                if exitThread:
-                    return
-
+            while not exitThread:
                 try:
-                    _, _, _, task = taskQ.get(timeout=0.1)
+                    task = taskQ.get(timeout=0.1)
                 except queue.Empty:
                     continue
 
-                if task["type"] == "print":
-                    logit("CL {}>: {} {}/{} ({})".format(task["change"], task["type"], task["chunkId"], task["totalChunks"], threading.current_thread().name))
-                    path = os.path.join(task["dir"], str(task["chunkId"]) + ".txt")
-                    with open(path, 'w+b') as stdoutFile:
-                        p4 = buildP4ListCmd(["-x", "-", "print"],
-                            stdin=task["fileArgs"],
-                            stdout=stdoutFile)
+                logit("CL {}>: running p4 print {}/{} ({})".format(task["change"], task["chunkId"], task["totalChunks"], threading.current_thread().name))
 
-                        p4.wait()
+                path = os.path.join(task["dir"], str(task["chunkId"]) + ".txt")
+                with open(path, 'w+b') as stdoutFile:
+                    p4 = buildP4ListCmd(["-x", "-", "print"],
+                        stdin=task["fileArgs"],
+                        stdout=stdoutFile)
 
-                    printedQ.put((task["change"], {
-                        "change": task["change"],
-                        "path": path,
-                        "description": task["description"],
-                        "files": task["files"],
-                        "fileArgs": task["fileArgs"],
-                        "dir": task["dir"],
-                        "totalChunks": task["totalChunks"]
-                    }))
-                    taskQ.task_done()
+                    p4.wait()
+
+                printedQ.put({
+                    "change": task["change"],
+                    "path": path,
+                    "description": task["description"],
+                    "files": task["files"],
+                    "fileArgs": task["fileArgs"],
+                    "dir": task["dir"],
+                    "totalChunks": task["totalChunks"]
+                })
+                taskQ.task_done()
 
         # run as a single thread and responsible for creating commits.
         # it reads from the "out" queue and ensures commits are created in order.
@@ -3746,13 +3743,10 @@ class P4Sync(Command, P4UserMap):
             nonlocal downloaded, commited, exitThread
 
             done = {}
-            while True:
-                if exitThread:
-                    return
-
+            while not exitThread:
                 if commited < len(changes):
                     try:
-                        _, task = printedQ.get(timeout=0.5)
+                        task = printedQ.get(timeout=0.5)
                         logit("CL {}>: downloaded (committer)".format(task["change"]))
                     except queue.Empty:
                         continue
@@ -3806,7 +3800,9 @@ class P4Sync(Command, P4UserMap):
         t.start()
         threads.append(t)
 
+        # get the list of files for all changes
         descriptions = p4_describe_all(changes)
+
         for i in range(len(descriptions)):
             d = descriptions[i]
             change = changes[i]
@@ -3839,7 +3835,6 @@ class P4Sync(Command, P4UserMap):
                     fileArgs = []
 
                 task = {
-                    "type": "print",
                     "change": cl["change"],
                     "description": cl["description"],
                     "chunk": chunk,
@@ -3850,13 +3845,13 @@ class P4Sync(Command, P4UserMap):
                     "totalChunks": totalChunks,
                 }
 
-                logit("CL {}>: creating chunk {} / {} from {} files".format(
+                logit("CL {}>: creating chunk {}/{} from {} files".format(
                     cl["change"],
                     chunkID,
                     totalChunks,
                     len(cl["fileArgs"])))
-                taskQ.put((1, cl["change"], chunkID, task))
-                
+                taskQ.put(task)
+
                 chunkID += 1
 
                 if len(fileArgs) == 0:
