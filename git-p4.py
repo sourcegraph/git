@@ -514,28 +514,37 @@ def p4_describe(change, shelved=False):
        the presence of field "time".  Return a dict of the
        results."""
 
+    return p4_describe_all([change], shelved=shelved)[0]
+
+def p4_describe_all(changes, shelved=False):
+    """Make sure it returns a valid result by checking for
+       the presence of field "time".  Return a dict of the
+       results."""
+
     cmd = ["describe", "-s"]
     if shelved:
         cmd += ["-S"]
-    cmd += [str(change)]
+    cmd += [str(change) for change in changes]
 
     ds = p4CmdList(cmd, skip_info=True)
-    if len(ds) != 1:
-        die("p4 describe -s %d did not return 1 result: %s" % (change, str(ds)))
 
-    d = ds[0]
+    if len(ds) != len(changes):
+        die("p4 describe did not return %d result: %s" % (len(changes), str(ds)))
 
-    if "p4ExitCode" in d:
-        die("p4 describe -s %d exited with %d: %s" % (change, d["p4ExitCode"],
-                                                      str(d)))
-    if "code" in d:
-        if d["code"] == "error":
-            die("p4 describe -s %d returned error code: %s" % (change, str(d)))
+    for i in range(0, len(ds)):
+        d = ds[i]
+        change = changes[i]
+        if "p4ExitCode" in d:
+            die("p4 describe -s %d exited with %d: %s" % (change, d["p4ExitCode"],
+                                                        str(d)))
+        if "code" in d:
+            if d["code"] == "error":
+                die("p4 describe -s %d returned error code: %s" % (change, str(d)))
 
-    if "time" not in d:
-        die("p4 describe -s %d returned no \"time\": %s" % (change, str(d)))
+        if "time" not in d:
+            die("p4 describe -s %d returned no \"time\": %s" % (change, str(d)))
 
-    return d
+    return ds
 
 #
 # Canonicalize the p4 type and return a tuple of the
@@ -3717,9 +3726,7 @@ class P4Sync(Command, P4UserMap):
                 if task["type"] == "describe":
                     logit("CL {}>: {} ({})".format(task["change"], task["type"], threading.current_thread().name))
                     description = p4_describe(task["change"])
-                    lock.acquire()
                     self.updateOptionDict(description)
-                    lock.release()
 
                     files = self.extractFilesFromCommit(description)
                     fileArgs = self.prepFileArgs(files)
@@ -3801,7 +3808,9 @@ class P4Sync(Command, P4UserMap):
                     
                     done.pop(changes[commited])
                     logit("CL {}>: committed".format(changes[commited]))
+                    lock.acquire()
                     commited += 1
+                    lock.release()
                     logit("committer: Downloaded: %s / %s, Committed: %s / %s" % (downloaded, len(changes), commited, len(changes)))
 
         # start the worker threads
