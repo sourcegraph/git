@@ -38,6 +38,7 @@ import glob
 import queue
 import threading
 import logging
+import pprint
 
 # On python2.7 where raw_input() and input() are both availble,
 # we want raw_input's semantics, but aliased to input for python3
@@ -3687,10 +3688,7 @@ class P4Sync(Command, P4UserMap):
         # taskQ is used to distribute work to threads.
         # a task can either be a p4 CL or a list of files to print.
         # files will always have a higher priority than CLs
-        taskQ = queue.PriorityQueue(self.threads*2)
-
-        # workers will write the result of the p4 describe command to this queue
-        describedQ = queue.Queue(1)
+        taskQ = queue.Queue(self.threads)
 
         # whenever a worker has finished running p4 print
         # it will send it to this queue.
@@ -3699,7 +3697,6 @@ class P4Sync(Command, P4UserMap):
         exitThread = False
 
         # stats
-        lock = threading.Lock()
         downloaded = 0
         commited = 0
 
@@ -3713,7 +3710,6 @@ class P4Sync(Command, P4UserMap):
         # Once the file is created, it is closed and the path
         # is pushed to the "out" queue 
         def worker():
-            nonlocal downloaded, commited, exitThread
             while True:
                 if exitThread:
                     return
@@ -3721,18 +3717,6 @@ class P4Sync(Command, P4UserMap):
                 try:
                     _, _, _, task = taskQ.get(timeout=0.1)
                 except queue.Empty:
-                    continue
-
-                if task["type"] == "describe":
-                    logit("CL {}>: {} ({})".format(task["change"], task["type"], threading.current_thread().name))
-                    description = p4_describe(task["change"])
-                    self.updateOptionDict(description)
-
-                    files = self.extractFilesFromCommit(description)
-                    fileArgs = self.prepFileArgs(files)
-
-                    describedQ.put({"files": files, "fileArgs": fileArgs, "change": task["change"], "description": description})
-                    taskQ.task_done()
                     continue
 
                 if task["type"] == "print":
@@ -3755,7 +3739,6 @@ class P4Sync(Command, P4UserMap):
                         "totalChunks": task["totalChunks"]
                     }))
                     taskQ.task_done()
-                
 
         # run as a single thread and responsible for creating commits.
         # it reads from the "out" queue and ensures commits are created in order.
@@ -3808,12 +3791,10 @@ class P4Sync(Command, P4UserMap):
                     
                     done.pop(changes[commited])
                     logit("CL {}>: committed".format(changes[commited]))
-                    lock.acquire()
                     commited += 1
-                    lock.release()
                     logit("committer: Downloaded: %s / %s, Committed: %s / %s" % (downloaded, len(changes), commited, len(changes)))
 
-        # start the worker threads
+         # start the worker threads
         threads = []
         for i in range (0, self.threads):
             t = threading.Thread(target=worker)
@@ -3825,92 +3806,77 @@ class P4Sync(Command, P4UserMap):
         t.start()
         threads.append(t)
 
-        # send the list of changes to q
-        i = 0
-        clDescription = None
-        while not exitThread:
-            try:
-                clDescription = describedQ.get(timeout=0.1)
-            except queue.Empty:
-                pass
+        descriptions = p4_describe_all(changes)
+        for i in range(len(descriptions)):
+            d = descriptions[i]
+            change = changes[i]
+            self.updateOptionDict(d)
+            files = self.extractFilesFromCommit(d)
+            fileArgs = self.prepFileArgs(files)
+            
+            cl = {"files": files, "fileArgs": fileArgs, "change": change, "description": d}
 
-            if clDescription is not None:
-                logit("CL {}>: generating chunks from {} files".format(clDescription["change"], len(clDescription["fileArgs"])))
-                fileArgs = clDescription["fileArgs"]
-                dir = "{}/{}".format(tempDir.name, clDescription["change"])
-                if not os.path.isdir(dir):
-                    os.mkdir(dir)
-    
-                chunkID = 1
-                
-                if len(fileArgs) % self.printBatchSize == 0:
-                    totalChunks = len(fileArgs) // self.printBatchSize
+            logit("CL {}>: generating chunks from {} files".format(cl["change"], len(cl["fileArgs"])))
+            fileArgs = cl["fileArgs"]
+            dir = "{}/{}".format(tempDir.name, cl["change"])
+            if not os.path.isdir(dir):
+                os.mkdir(dir)
+
+            chunkID = 1
+            
+            if len(fileArgs) % self.printBatchSize == 0:
+                totalChunks = len(fileArgs) // self.printBatchSize
+            else:
+                totalChunks = len(fileArgs) // self.printBatchSize + 1
+
+            while len(fileArgs) >= 0:
+                # take at most self.printBatchSize elements from the list
+                if len(fileArgs) > self.printBatchSize:
+                    chunk = fileArgs[:self.printBatchSize]
+                    fileArgs = fileArgs[self.printBatchSize:]
                 else:
-                    totalChunks = len(fileArgs) // self.printBatchSize + 1
+                    chunk = fileArgs
+                    fileArgs = []
 
-                while len(fileArgs) >= 0:
-                    # take at most self.printBatchSize elements from the list
-                    if len(fileArgs) > self.printBatchSize:
-                        chunk = fileArgs[:self.printBatchSize]
-                        fileArgs = fileArgs[self.printBatchSize:]
-                    else:
-                        chunk = fileArgs
-                        fileArgs = []
-
-                    task = {
-                        "type": "print",
-                        "change": clDescription["change"],
-                        "description": clDescription["description"],
-                        "chunk": chunk,
-                        "files": clDescription["files"],
-                        "fileArgs": clDescription["fileArgs"],
-                        "dir": dir,
-                        "chunkId": chunkID,
-                        "totalChunks": totalChunks,
-                    }
-
-                    logit("CL {}>: creating chunk {} / {} from {} files".format(
-                        clDescription["change"],
-                        chunkID,
-                        totalChunks,
-                        len(clDescription["fileArgs"])))
-                    taskQ.put((1, clDescription["change"], chunkID, task))
-                    
-                    chunkID += 1
-
-                    if len(fileArgs) == 0:
-                        break
-
-                clDescription = None
-                continue
-
-            if i >= len(changes):
-                lock.acquire()
-                if commited >= len(changes):
-                    exitThread = True
-                lock.release()
-                if exitThread:
-                    taskQ.join()
-                continue
-
-            try:
                 task = {
-                    "type": "describe",
-                    "change": changes[i],
+                    "type": "print",
+                    "change": cl["change"],
+                    "description": cl["description"],
+                    "chunk": chunk,
+                    "files": cl["files"],
+                    "fileArgs": cl["fileArgs"],
+                    "dir": dir,
+                    "chunkId": chunkID,
+                    "totalChunks": totalChunks,
                 }
-                taskQ.put((2, changes[i], 0, task), timeout=0.1)
-                i += 1
-            except queue.Full:
-                pass
 
-        # signal the threads that there is no work done
-        # and wait for them to finish
+                logit("CL {}>: creating chunk {} / {} from {} files".format(
+                    cl["change"],
+                    chunkID,
+                    totalChunks,
+                    len(cl["fileArgs"])))
+                taskQ.put((1, cl["change"], chunkID, task))
+                
+                chunkID += 1
+
+                if len(fileArgs) == 0:
+                    break
+
+            continue
+
+        # wait for all the tasks to be done
+        taskQ.join()
+        printedQ.join()
+
+        # signal the threads that there is no more work to be done
         exitThread = True
         for t in threads:
             t.join()
-        
+        logit("threads released")
+
         # cleanup the temp directory
         tempDir.cleanup()
+        logit("temp directory cleaned up")
 
     def importChanges(self, changes, origin_revision=0):
         cnt = 1
