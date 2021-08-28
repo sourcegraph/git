@@ -52,7 +52,7 @@ except:
 verbose = False
 
 logging.basicConfig(
-    format='%(asctime)s %(levelname)-8s %(message)s',
+    format='%(asctime)s %(message)s',
     level=logging.INFO,
     datefmt='%Y-%m-%d %H:%M:%S')
 
@@ -3667,17 +3667,18 @@ class P4Sync(Command, P4UserMap):
         return None
 
     def importChangesInParallel(self, changes):
+        # n-1 workers and 1 for commits
         self.threads = self.threads - 1
-        if self.threads < 2:
-            self.threads = 2
+        if self.threads < 1:
+            self.threads = 1
 
         # create a temporary directory to store p4 changes as files
         tempDir = tempfile.TemporaryDirectory()
         
-        # taskQ is used to distribute work to threads
+        # taskQ is used to distribute work to threads.
         # a task can either be a p4 CL or a list of files to print.
         # files will always have a higher priority than CLs
-        taskQ = queue.PriorityQueue(self.threads)
+        taskQ = queue.PriorityQueue(self.threads*2)
 
         # workers will write the result of the p4 describe command to this queue
         describedQ = queue.Queue(1)
@@ -3737,7 +3738,7 @@ class P4Sync(Command, P4UserMap):
 
                         p4.wait()
 
-                    printedQ.put({
+                    printedQ.put((task["change"], {
                         "change": task["change"],
                         "path": path,
                         "description": task["description"],
@@ -3745,7 +3746,7 @@ class P4Sync(Command, P4UserMap):
                         "fileArgs": task["fileArgs"],
                         "dir": task["dir"],
                         "totalChunks": task["totalChunks"]
-                    })
+                    }))
                     taskQ.task_done()
                 
 
@@ -3761,7 +3762,7 @@ class P4Sync(Command, P4UserMap):
 
                 if commited < len(changes):
                     try:
-                        task = printedQ.get(timeout=0.5)
+                        _, task = printedQ.get(timeout=0.5)
                         logit("CL {}>: downloaded (committer)".format(task["change"]))
                     except queue.Empty:
                         continue
@@ -3803,7 +3804,7 @@ class P4Sync(Command, P4UserMap):
                     commited += 1
                     logit("committer: Downloaded: %s / %s, Committed: %s / %s" % (downloaded, len(changes), commited, len(changes)))
 
-        # start the commit downloader threads
+        # start the worker threads
         threads = []
         for i in range (0, self.threads):
             t = threading.Thread(target=worker)
@@ -3820,7 +3821,7 @@ class P4Sync(Command, P4UserMap):
         clDescription = None
         while not exitThread:
             try:
-                clDescription = describedQ.get_nowait()
+                clDescription = describedQ.get(timeout=0.1)
             except queue.Empty:
                 pass
 
