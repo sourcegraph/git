@@ -38,7 +38,6 @@ import glob
 import queue
 import threading
 import logging
-import pprint
 
 # On python2.7 where raw_input() and input() are both availble,
 # we want raw_input's semantics, but aliased to input for python3
@@ -2820,7 +2819,7 @@ class P4Sync(Command, P4UserMap):
         self.largeFileSystem = None
         self.suppress_meta_comment = False
         self.threads = 10
-        self.printBatchSize = 10
+        self.printBatchSize = 1000
         self.describeBatchSize = 1000
 
         if gitConfig('git-p4.largeFileSystem'):
@@ -3702,10 +3701,12 @@ class P4Sync(Command, P4UserMap):
         downloaded = 0
         commited = 0
 
-        def logit(*args, **kwargs):
-            logging.info(*args, **kwargs)
+        def logit(msg, thread_name=None):
+            if thread_name is None:
+                thread_name = threading.current_thread().name
+            logging.info("({:>10}) {}".format(thread_name, msg))
 
-        # thread responsible for running p4 print against a list of files and write them to a file.
+        # thread responsible for running p4 print against a list of files and write the output to a temporary file.
         # Each file will be stored in <temp directory>/<change number>/<chunk ID>.txt and contain
         # the raw input of the "p4 -G -x - print" command.
         def worker():
@@ -3715,7 +3716,7 @@ class P4Sync(Command, P4UserMap):
                 except queue.Empty:
                     continue
 
-                logit("CL {}>: {}/{} ({}) -> p4 print".format(task["change"], task["chunkId"], task["totalChunks"], threading.current_thread().name))
+                logit("CL {}>: {}/{} p4 print".format(task["change"], task["chunkId"], task["totalChunks"]))
 
                 path = os.path.join(task["dir"], str(task["chunkId"]) + ".txt")
                 with open(path, 'w+b') as stdoutFile:
@@ -3725,7 +3726,7 @@ class P4Sync(Command, P4UserMap):
 
                     p4.wait()
 
-                logit("CL {}>: {}/{} ({}) -> downloaded".format(task["change"], task["chunkId"], task["totalChunks"], threading.current_thread().name))
+                logit("CL {}>: {}/{} -> downloaded".format(task["change"], task["chunkId"], task["totalChunks"]))
                 commitQ.put({
                     "change": task["change"],
                     "path": path,
@@ -3769,14 +3770,14 @@ class P4Sync(Command, P4UserMap):
                         continue
 
                     cl["complete"] = True
-                    logit("CL {}>: received all chunks (committer)".format(task["change"]))
+                    logit("CL {}>: received all chunks".format(task["change"]), thread_name="Committer")
 
                 downloaded += 1
 
                 while commited < len(changes):
                     toCommit = done.get(changes[commited])
                     if toCommit is None or toCommit["complete"] is False:
-                        logit("CL {}>: waiting for CL".format(changes[commited]))
+                        logit("CL {}>: waiting for CL".format(changes[commited]), thread_name="Committer")
                         break
 
                     self.commit(toCommit["description"], toCommit["files"], self.branch,
@@ -3785,7 +3786,7 @@ class P4Sync(Command, P4UserMap):
                     done.pop(changes[commited])
                     logit("CL {}>: committed".format(changes[commited]))
                     commited += 1
-                    logit("committer: Downloaded: %s / %s, Committed: %s / %s" % (downloaded, len(changes), commited, len(changes)))
+                    logit("Downloaded: %s / %s, Committed: %s / %s" % (downloaded, len(changes), commited, len(changes)), thread_name="Committer")
 
          # start the worker threads
         threads = []
@@ -3813,7 +3814,6 @@ class P4Sync(Command, P4UserMap):
                 nonlocal batch, printQ
                 change = batch[0]
                 batch = batch[1:]
-                logit("CL {}>: callback called".format(change))
 
                 self.updateOptionDict(d)
                 files = self.extractFilesFromCommit(d)
@@ -3821,7 +3821,6 @@ class P4Sync(Command, P4UserMap):
                 
                 cl = {"files": files, "fileArgs": fileArgs, "change": change, "description": d}
 
-                logit("CL {}>: generating chunks from {} files".format(cl["change"], len(cl["fileArgs"])))
                 fileArgs = cl["fileArgs"]
                 dir = "{}/{}".format(tempDir.name, cl["change"])
                 if not os.path.isdir(dir):
@@ -4070,7 +4069,6 @@ class P4Sync(Command, P4UserMap):
                 print("Getting p4 changes for %s...%s" % (', '.join(self.depotPaths),
                                                           self.changeRange))
             changes = p4ChangesForPaths(self.depotPaths, self.changeRange, self.changes_block_size)
-            # print("Changes", changes)
 
             if len(self.maxChanges) > 0:
                 changes = changes[:min(int(self.maxChanges), len(changes))]
