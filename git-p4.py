@@ -38,7 +38,6 @@ import glob
 import queue
 import threading
 import logging
-import pathlib
 
 
 # On python2.7 where raw_input() and input() are both availble,
@@ -65,6 +64,8 @@ defaultLabelRegexp = r'[a-zA-Z0-9_\-.]+$'
 defaultBlockSize = 1<<20
 
 p4_access_checked = False
+
+base_dir = os.getcwd()
 
 def p4_build_cmd(cmd):
     """Build a suitable p4 command line.
@@ -402,6 +403,11 @@ def system(cmd, ignore_error=False):
         raise CalledProcessError(retcode, cmd)
 
     return retcode
+
+def logit(msg, thread_name=None):
+    if thread_name is None:
+        thread_name = threading.current_thread().name
+    logging.info("({:>10}) {}".format(thread_name, msg))
 
 def p4_system(cmd):
     """Specifically invoke p4 as the system command. """
@@ -3693,10 +3699,22 @@ class P4Sync(Command, P4UserMap):
 
         # create a temporary directory to store p4 changes as files
         tempDir = None
+        tempDirPath = self.tmpDir
         if self.tmpDir == "":
             tempDir = tempfile.TemporaryDirectory()
+            tempDirPath = tempDir.name
         else:
-            pathlib.Path(self.tmpDir).mkdir(parents=True, exist_ok=True)
+            if not os.path.isabs(tempDirPath):
+                # the current dir is now the clone destination
+                # we should resolve the right directory path based
+                # on the previous working dir
+                global base_dir
+                tempDirPath = os.path.join(base_dir, tempDirPath)
+
+            if not os.path.isdir(tempDirPath):
+                os.mkdir(tempDirPath)
+
+        logit("Temporary directory: {}".format(tempDirPath))
 
         # printQ is used to run p4 print commands concurrently.
         printQ = queue.Queue(1)
@@ -3708,11 +3726,6 @@ class P4Sync(Command, P4UserMap):
         # stats
         downloaded = 0
         commited = 0
-
-        def logit(msg, thread_name=None):
-            if thread_name is None:
-                thread_name = threading.current_thread().name
-            logging.info("({:>10}) {}".format(thread_name, msg))
 
         # thread responsible for running p4 print against a list of files and write the output to a temporary file.
         # Each file will be stored in <temp directory>/<change number>/<chunk ID>.txt and contain
@@ -3791,7 +3804,8 @@ class P4Sync(Command, P4UserMap):
                     self.commit(toCommit["description"], toCommit["files"], self.branch,
                                 self.initialParent, localPath=toCommit["dir"])
                     
-                    done.pop(changes[commited])
+                    cl = done.pop(changes[commited])
+                    shutil.rmtree(cl["dir"])
                     logit("CL {}>: committed".format(changes[commited]))
                     commited += 1
                     logit("Downloaded: %s / %s, Committed: %s / %s" % (downloaded, len(changes), commited, len(changes)), thread_name="Committer")
@@ -3830,7 +3844,7 @@ class P4Sync(Command, P4UserMap):
                 cl = {"files": files, "fileArgs": fileArgs, "change": change, "description": d}
 
                 fileArgs = cl["fileArgs"]
-                dir = "{}/{}".format(tempDir.name, cl["change"])
+                dir = "{}/{}".format(tempDirPath, cl["change"])
                 if not os.path.isdir(dir):
                     os.mkdir(dir)
 
