@@ -38,6 +38,7 @@ import glob
 import queue
 import threading
 import logging
+import pprint
 
 
 # On python2.7 where raw_input() and input() are both availble,
@@ -2729,6 +2730,8 @@ class View(object):
                 # assume error is "... file(s) not in client view"
                 continue
             if "clientFile" not in res:
+                logit("Cannot get clientFile from 'p4 where' result")
+                logit(pprint.pformat(res))
                 die("No clientFile in 'p4 where' output")
             if "unmap" in res:
                 # it will list all of them, but only one not unmap-ped
@@ -2830,7 +2833,7 @@ class P4Sync(Command, P4UserMap):
         self.suppress_meta_comment = False
         self.threads = 10
         self.printBatchSize = 1000
-        self.describeBatchSize = 1000
+        self.describeBatchSize = 100
         self.tmpDir = ""
 
         if gitConfig('git-p4.largeFileSystem'):
@@ -3693,9 +3696,9 @@ class P4Sync(Command, P4UserMap):
 
     def importChangesInParallel(self, changes):
         # n-1 workers and 1 for commits
-        self.threads = self.threads - 1
-        if self.threads < 1:
-            self.threads = 1
+        threadNb = self.threads - 1
+        if threadNb < 1:
+            threadNb = 1
 
         # create a temporary directory to store p4 changes as files
         tempDir = None
@@ -3717,9 +3720,9 @@ class P4Sync(Command, P4UserMap):
         logit("Temporary directory: {}".format(tempDirPath))
 
         # printQ is used to run p4 print commands concurrently.
-        printQ = queue.Queue(1)
+        printQ = queue.Queue(threadNb)
         # commitQ is used by workers to commit files.
-        commitQ = queue.Queue(1)
+        commitQ = queue.Queue(threadNb)
 
         exitThread = False
 
@@ -3812,7 +3815,7 @@ class P4Sync(Command, P4UserMap):
 
          # start the worker threads
         threads = []
-        for i in range (0, self.threads):
+        for i in range (0, threadNb):
             t = threading.Thread(target=worker)
             t.start()
             threads.append(t)
