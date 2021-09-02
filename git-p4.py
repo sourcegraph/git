@@ -2729,6 +2729,10 @@ class View(object):
             if "code" in res and res["code"] == "error":
                 # assume error is "... file(s) not in client view"
                 continue
+            if "p4ExitCode" in res:
+                # assume error is "... file(s) not in client view"
+                logit("Cannot get clientFile from 'p4 where' result. Ignoring... Files: {}".format(fileArgs))
+                continue
             if "clientFile" not in res:
                 logit("Cannot get clientFile from 'p4 where' result")
                 logit(pprint.pformat(res))
