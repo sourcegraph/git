@@ -39,6 +39,7 @@ import queue
 import threading
 import logging
 import pprint
+import traceback
 
 
 # On python2.7 where raw_input() and input() are both availble,
@@ -2663,6 +2664,7 @@ class View(object):
         self.client_prefix = "//%s/" % client_name
         # cache results of "p4 where" to lookup client file locations
         self.client_spec_path_cache = {}
+        self.lock = threading.Lock()
 
     def append(self, view_line):
         """Parse a view line, splitting it into depot and client
@@ -2718,8 +2720,10 @@ class View(object):
     def update_client_spec_path_cache(self, files):
         """ Caching file paths by "p4 where" batch query """
 
+        self.lock.acquire()
         # List depot file paths exclude that already cached
         fileArgs = [f['path'] for f in files if decode_path(f['path']) not in self.client_spec_path_cache]
+        self.lock.release()
 
         if len(fileArgs) == 0:
             return  # All files in cache
@@ -2745,6 +2749,8 @@ class View(object):
                 depot_path = depot_path.lower()
             self.client_spec_path_cache[depot_path] = self.convert_client_path(res["clientFile"])
 
+        self.lock.acquire()
+
         # not found files or unmap files set to ""
         for depotFile in fileArgs:
             depotFile = decode_path(depotFile)
@@ -2752,6 +2758,8 @@ class View(object):
                 depotFile = depotFile.lower()
             if depotFile not in self.client_spec_path_cache:
                 self.client_spec_path_cache[depotFile] = b''
+
+        self.lock.release()
 
     def map_in_client(self, depot_path):
         """Return the relative location in the client where this
@@ -2800,8 +2808,8 @@ class P4Sync(Command, P4UserMap):
                 optparse.make_option("--threads", dest="threads", type="int"),
                 optparse.make_option("--print-batch-size", dest="printBatchSize", type="int"),
                 optparse.make_option("--describe-batch-size", dest="describeBatchSize", type="int"),
-                optparse.make_option("--tmp-dir", dest="tmpDir", help="Directory to store temporary files")
-                
+                optparse.make_option("--tmp-dir", dest="tempDir", help="Directory to store temporary files"),
+                optparse.make_option("--keep-tmp-files", dest="keepTempFiles", help="Do not remove temporary files after commit", action="store_true")
         ]
         self.description = """Imports from Perforce into a git repository.\n
     example:
@@ -2838,7 +2846,8 @@ class P4Sync(Command, P4UserMap):
         self.threads = 10
         self.printBatchSize = 1000
         self.describeBatchSize = 100
-        self.tmpDir = ""
+        self.tempDir = ""
+        self.keepTempFiles = False
 
         if gitConfig('git-p4.largeFileSystem'):
             largeFileSystemConstructor = globals()[gitConfig('git-p4.largeFileSystem')]
@@ -3219,6 +3228,7 @@ class P4Sync(Command, P4UserMap):
 
             # do the last chunk
             if 'depotFile' in self.stream_file:
+                logit("Last chunk: {}, {}".format(self.stream_file['depotFile'], self.stream_file['rev']), thread_name="Committer")
                 self.streamOneP4File(self.stream_file, self.stream_contents)
 
     # Get all the files to pass to p4 print
@@ -3344,12 +3354,12 @@ class P4Sync(Command, P4UserMap):
         if self.verbose:
             print('commit into {0}'.format(branch))
 
-        files = [f for f in files
-            if self.hasBranchPrefix(decode_path(f['path']))]
-        self.findShadowedFiles(files, details['change'])
+        # files = [f for f in files
+        #     if self.hasBranchPrefix(decode_path(f['path']))]
+        # self.findShadowedFiles(files, details['change'])
 
-        if self.clientSpecDirs:
-            self.clientSpecDirs.update_client_spec_path_cache(files)
+        # if self.clientSpecDirs:
+        #     self.clientSpecDirs.update_client_spec_path_cache(files)
 
         files = [f for f in files if self.inClientSpec(decode_path(f['path']))]
 
@@ -3706,8 +3716,8 @@ class P4Sync(Command, P4UserMap):
 
         # create a temporary directory to store p4 changes as files
         tempDir = None
-        tempDirPath = self.tmpDir
-        if self.tmpDir == "":
+        tempDirPath = self.tempDir
+        if self.tempDir == "":
             tempDir = tempfile.TemporaryDirectory()
             tempDirPath = tempDir.name
         else:
@@ -3728,104 +3738,17 @@ class P4Sync(Command, P4UserMap):
         # commitQ is used by workers to commit files.
         commitQ = queue.Queue(threadNb)
 
-        exitThread = False
-
-        # stats
-        downloaded = 0
-        commited = 0
-
-        # thread responsible for running p4 print against a list of files and write the output to a temporary file.
-        # Each file will be stored in <temp directory>/<change number>/<chunk ID>.txt and contain
-        # the raw input of the "p4 -G -x - print" command.
-        def worker():
-            while not exitThread:
-                try:
-                    task = printQ.get(timeout=0.1)
-                except queue.Empty:
-                    continue
-
-                logit("CL {}>: {}/{} p4 print".format(task["change"], task["chunkId"], task["totalChunks"]))
-
-                path = os.path.join(task["dir"], str(task["chunkId"]) + ".txt")
-                with open(path, 'w+b') as stdoutFile:
-                    p4 = buildP4ListCmd(["-x", "-", "print"],
-                        stdin=task["fileArgs"],
-                        stdout=stdoutFile)
-
-                    p4.wait()
-
-                logit("CL {}>: {}/{} -> downloaded".format(task["change"], task["chunkId"], task["totalChunks"]))
-                commitQ.put({
-                    "change": task["change"],
-                    "path": path,
-                    "description": task["description"],
-                    "files": task["files"],
-                    "fileArgs": task["fileArgs"],
-                    "dir": task["dir"],
-                    "totalChunks": task["totalChunks"],
-                })
-                printQ.task_done()
-
-        # run as a single thread and responsible for creating commits.
-        # it reads from the "out" queue and ensures commits are created in order.
-        def commiter():
-            nonlocal downloaded, commited, exitThread
-
-            done = {}
-            while not exitThread:
-                if commited < len(changes):
-                    try:
-                        task = commitQ.get(timeout=0.5)
-                    except queue.Empty:
-                        continue
-
-                    cl = done.get(task["change"])
-                    if cl is None:
-                        cl = {
-                            "description": task["description"],
-                            "files": task["files"],
-                            "fileArgs": task["fileArgs"],
-                            "dir": task["dir"],
-                            "chunkCount": 0,
-                            "complete": False,
-                        }
-                        done[task["change"]] = cl
-
-                    cl["chunkCount"] += 1
-                    commitQ.task_done()
-
-                    if cl["chunkCount"] < task["totalChunks"]:
-                        continue
-
-                    cl["complete"] = True
-                    logit("CL {}>: received all chunks".format(task["change"]), thread_name="Committer")
-
-                downloaded += 1
-
-                while commited < len(changes):
-                    toCommit = done.get(changes[commited])
-                    if toCommit is None or toCommit["complete"] is False:
-                        logit("CL {}>: waiting for CL".format(changes[commited]), thread_name="Committer")
-                        break
-
-                    self.commit(toCommit["description"], toCommit["files"], self.branch,
-                                self.initialParent, localPath=toCommit["dir"])
-                    
-                    cl = done.pop(changes[commited])
-                    shutil.rmtree(cl["dir"])
-                    logit("CL {}>: committed".format(changes[commited]))
-                    commited += 1
-                    logit("Downloaded: %s / %s, Committed: %s / %s" % (downloaded, len(changes), commited, len(changes)), thread_name="Committer")
+        self.exitThreads = False
 
          # start the worker threads
         threads = []
         for i in range (0, threadNb):
-            t = threading.Thread(target=worker)
+            t = threading.Thread(target=self.downloadChange, args=(printQ, commitQ,))
             t.start()
             threads.append(t)
 
         # start the commiter thread (only one)
-        t = threading.Thread(target=commiter)
+        t = threading.Thread(target=self.commitChanges, args=(commitQ, changes))
         t.start()
         threads.append(t)
 
@@ -3856,7 +3779,7 @@ class P4Sync(Command, P4UserMap):
                     os.mkdir(dir)
 
                 chunkID = 1
-                
+
                 totalChunks = len(fileArgs) // self.printBatchSize + 1 if len(fileArgs) % self.printBatchSize > 0 else 0
 
                 while True:
@@ -3894,20 +3817,135 @@ class P4Sync(Command, P4UserMap):
             logit("running p4 describe in batch {}/{}".format(start // self.describeBatchSize, totalBatch))
             p4_describe_all(batch, cb=describeCb)
 
-        # wait for all the tasks to be done
+        # wait for all tasks to be completed
         printQ.join()
         commitQ.join()
 
         # signal the threads that there is no more work to be done
-        exitThread = True
+        self.exitThreads = True
         for t in threads:
             t.join()
         logit("threads released")
 
         # cleanup the temp directory
-        if self.tmpDir == "":
+        if self.tempDir == "":
             tempDir.cleanup()
             logit("temp directory cleaned up")
+
+    def downloadChange(self, printQ, commitQ):
+        """
+        thread responsible for running p4 print against a list of files and write the output to a temporary file.
+        Each file will be stored in <temp directory>/<change number>/<chunk ID>.txt and contain
+        the raw input of the "p4 -G -x - print" command.
+        """
+        while not self.exitThreads:
+            try:
+                task = printQ.get(timeout=0.1)
+            except queue.Empty:
+                continue
+
+            path = os.path.join(task["dir"], str(task["chunkId"]) + ".txt")
+            if not os.path.exists(path):
+                logit("CL {}>: {}/{} -> p4 print".format(task["change"], task["chunkId"], task["totalChunks"]))
+                with open(path, 'w+b') as stdoutFile:
+                    p4 = buildP4ListCmd(["-x", "-", "print"],
+                        stdin=task["fileArgs"],
+                        stdout=stdoutFile)
+
+                    p4.wait()
+                logit("CL {}>: {}/{} -> p4 print done".format(task["change"], task["chunkId"], task["totalChunks"]))
+            else:
+                logit("CL {}>: {}/{} -> reuse cached file".format(task["change"], task["chunkId"], task["totalChunks"]))
+
+            if self.clientSpecDirs and task["chunkId"] == 1:
+                logit("CL {}>: {}/{} -> p4 where".format(task["change"], task["chunkId"], task["totalChunks"]))
+                task["files"] = [f for f in task["files"]
+                    if self.hasBranchPrefix(decode_path(f['path']))]
+                self.findShadowedFiles(task["files"], task["description"]['change'])
+                self.clientSpecDirs.update_client_spec_path_cache(task["files"])
+                logit("CL {}>: {}/{} -> p4 where done".format(task["change"], task["chunkId"], task["totalChunks"]))
+
+            commitQ.put({
+                "change": task["change"],
+                "path": path,
+                "description": task["description"],
+                "files": task["files"],
+                "fileArgs": task["fileArgs"],
+                "dir": task["dir"],
+                "totalChunks": task["totalChunks"],
+            })
+            printQ.task_done()
+
+    def commitChanges(self, commitQ, changes):
+        """
+        run as a single thread responsible for creating commits.
+        it reads from the "commitQ" queue and ensures commits are created in order.
+        """
+        # stats
+        downloaded = 0
+        commited = 0
+
+        done = {}
+        while not self.exitThreads:
+            if commited < len(changes):
+                try:
+                    task = commitQ.get(timeout=0.5)
+                except queue.Empty:
+                    continue
+
+                cl = done.get(task["change"])
+                if cl is None:
+                    cl = {
+                        "description": task["description"],
+                        "files": task["files"],
+                        "fileArgs": task["fileArgs"],
+                        "dir": task["dir"],
+                        "chunkCount": 0,
+                        "complete": False,
+                    }
+                    done[task["change"]] = cl
+
+                cl["chunkCount"] += 1
+                commitQ.task_done()
+
+                if cl["chunkCount"] < task["totalChunks"]:
+                    continue
+
+                cl["complete"] = True
+                logit("CL {}>: received all chunks".format(task["change"]), thread_name="Committer")
+
+            downloaded += 1
+
+            while commited < len(changes):
+                toCommit = done.get(changes[commited])
+                if toCommit is None or toCommit["complete"] is False:
+                    logit("CL {}>: waiting for CL".format(changes[commited]), thread_name="Committer")
+                    break
+
+                try:
+                    self.commit(toCommit["description"], toCommit["files"], self.branch,
+                        self.initialParent, localPath=toCommit["dir"])
+                except IOError as err:
+                    traceback.print_exc()
+                    print("IO error with git fast-import. Is your git version recent enough?")
+                    print("IO error details: {}".format(err))
+                    print("gitError output:", self.gitError.read())
+                    sys.exit(1)
+                except ValueError as err:
+                    traceback.print_exc()
+                    print("Value error with git fast-import")
+                    print("Value error details: {}".format(err))
+                    print("gitError output:", self.gitError.read())
+                    sys.exit(1)
+
+                cl = done.pop(changes[commited])
+
+                if not self.keepTempFiles:
+                    shutil.rmtree(cl["dir"])
+
+                logit("CL {}>: committed".format(changes[commited]), thread_name="Committer")
+                commited += 1
+                logit("Downloaded: %s / %s, Committed: %s / %s" % (downloaded, len(changes), commited, len(changes)), thread_name="Committer")
 
     def importChanges(self, changes, origin_revision=0):
         cnt = 1
@@ -4377,6 +4415,7 @@ class P4Sync(Command, P4UserMap):
                 read_pipe("git update-ref -d %s" % branch)
             os.rmdir(os.path.join(os.environ.get("GIT_DIR", ".git"), self.tempBranchLocation))
 
+        print(2, git_is_empty())
         # Create a symbolic ref p4/HEAD pointing to p4/<branch> to allow
         # a convenient shortcut refname "p4".
         if self.importIntoRemotes:
@@ -4384,7 +4423,11 @@ class P4Sync(Command, P4UserMap):
             if not gitBranchExists(head_ref) and gitBranchExists(self.branch):
                 system(["git", "symbolic-ref", head_ref, self.branch])
 
+        print(3, git_is_empty())
         return True
+
+def git_is_empty():
+    return len(os.listdir("."))
 
 class P4Rebase(Command):
     def __init__(self):
@@ -4485,11 +4528,14 @@ class P4Clone(P4Sync):
         if not P4Sync.run(self, depotPaths):
             return False
 
+        print(4, git_is_empty())
         # create a master branch and check out a work tree
         if gitBranchExists(self.branch):
             system([ "git", "branch", currentGitBranch(), self.branch ])
+            print(5, git_is_empty())
             if not self.cloneBare:
                 system([ "git", "checkout", "-f" ])
+                print(6, git_is_empty())
         else:
             print('Not checking out any branch, use ' \
                   '"git checkout -q -b master <branch>"')
