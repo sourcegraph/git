@@ -2765,6 +2765,8 @@ class P4Sync(Command, P4UserMap):
                                      action="callback", callback=cloneExcludeCallback, type="string",
                                      help="exclude depot path"),
                 optparse.make_option("--threads", dest="threads", type="int"),
+                optparse.make_option("--no-disk-free-check",dest="noDiskFreeCheck",action='store_true',
+                                     help="Skip checking if enough free disk space is availible")
                 
         ]
         self.description = """Imports from Perforce into a git repository.\n
@@ -2800,6 +2802,7 @@ class P4Sync(Command, P4UserMap):
         self.largeFileSystem = None
         self.suppress_meta_comment = False
         self.threads = 10
+        self.noDiskFreeCheck = False
 
         if gitConfig('git-p4.largeFileSystem'):
             largeFileSystemConstructor = globals()[gitConfig('git-p4.largeFileSystem')]
@@ -3075,7 +3078,7 @@ class P4Sync(Command, P4UserMap):
                 if "data" in marshalled:
                     err = marshalled["data"].rstrip()
 
-        if not err and 'fileSize' in self.stream_file:
+        if not err and 'fileSize' in self.stream_file and not self.noDiskFreeCheck:
             required_bytes = int((4 * int(self.stream_file["fileSize"])) - calcDiskFree())
             if required_bytes > 0:
                 err = 'Not enough space left on %s! Free at least %i MB.' % (
