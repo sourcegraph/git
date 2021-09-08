@@ -40,6 +40,7 @@ import threading
 import logging
 import pprint
 import traceback
+import signal
 
 
 # On python2.7 where raw_input() and input() are both availble,
@@ -785,7 +786,8 @@ def buildP4ListCmd(cmd, stdin=None, stdout=None, stdin_mode='w+b'):
     return subprocess.Popen(cmd,
                           shell=expand,
                           stdin=stdin_file,
-                          stdout=stdout)
+                          stdout=stdout,
+                          start_new_session=True)
 
 def p4CmdList(cmd, stdin=None, stdin_mode='w+b', cb=None, skip_info=False,
         errors_as_exceptions=False):
@@ -3731,7 +3733,14 @@ class P4Sync(Command, P4UserMap):
         # cancelation event used to stop threads
         cancelEvent = threading.Event()
 
-         # start the worker threads
+        # handling interruptions
+        def signal_handler(signal, frame):
+            logit("Interrupt signal, exiting...")
+            cancelEvent.set()
+
+        signal.signal(signal.SIGINT, signal_handler)
+        
+        # start the worker threads
         threads = []
         for i in range (0, threadNb):
             t = threading.Thread(target=self.downloadChange, args=(printQ, commitQ, cancelEvent,))
@@ -4189,7 +4198,8 @@ class P4Sync(Command, P4UserMap):
         self.importProcess = subprocess.Popen(["git", "fast-import"],
                                               stdin=subprocess.PIPE,
                                               stdout=subprocess.PIPE,
-                                              stderr=subprocess.PIPE);
+                                              stderr=subprocess.PIPE,
+                                              start_new_session=True);
         self.gitOutput = self.importProcess.stdout
         self.gitStream = self.importProcess.stdin
         self.gitError = self.importProcess.stderr
