@@ -1118,7 +1118,7 @@ def createOrUpdateBranchesFromOrigin(localRefPrefix = "refs/remotes/p4/", silent
 def originP4BranchesExist():
         return gitBranchExists("origin") or gitBranchExists("origin/p4") or gitBranchExists("origin/p4/master")
 
-def get_timzeone():
+def get_timezone():
     try:
         tz = p4Cmd(["info"])['serverDate'].split()[2]
     except IndexError:
@@ -2878,7 +2878,7 @@ class P4Sync(Command, P4UserMap):
         self.knownBranches = {}
         self.initialParents = {}
 
-        self.tz = get_timzeone()
+        self.tz = get_timezone()
         self.labels = {}
 
     # Force a checkpoint in fast-import and wait for it to finish
