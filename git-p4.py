@@ -2808,7 +2808,9 @@ class P4Sync(Command, P4UserMap):
                 optparse.make_option("--print-batch-size", dest="printBatchSize", type="int"),
                 optparse.make_option("--describe-batch-size", dest="describeBatchSize", type="int"),
                 optparse.make_option("--tmp-dir", dest="tempDir", help="Directory to store temporary files"),
-                optparse.make_option("--keep-tmp-files", dest="keepTempFiles", help="Do not remove temporary files after commit", action="store_true")
+                optparse.make_option("--keep-tmp-files", dest="keepTempFiles", help="Do not remove temporary files after commit", action="store_true"),
+                optparse.make_option("--no-disk-free-check", dest="noDiskFreeCheck", action='store_true',
+                            help="Skip checking if enough free disk space is availaible")
         ]
         self.description = """Imports from Perforce into a git repository.\n
     example:
@@ -2843,6 +2845,7 @@ class P4Sync(Command, P4UserMap):
         self.largeFileSystem = None
         self.suppress_meta_comment = False
         self.threads = 10
+        self.noDiskFreeCheck = False
         self.printBatchSize = 1000
         self.describeBatchSize = 100
         self.tempDir = ""
@@ -3122,7 +3125,7 @@ class P4Sync(Command, P4UserMap):
                 if "data" in marshalled:
                     err = marshalled["data"].rstrip()
 
-        if not err and 'fileSize' in self.stream_file:
+        if not err and 'fileSize' in self.stream_file and not self.noDiskFreeCheck:
             required_bytes = int((4 * int(self.stream_file["fileSize"])) - calcDiskFree())
             if required_bytes > 0:
                 err = 'Not enough space left on %s! Free at least %i MB.' % (
@@ -3770,7 +3773,7 @@ class P4Sync(Command, P4UserMap):
                 self.updateOptionDict(d)
                 files = self.extractFilesFromCommit(d)
                 fileArgs = self.prepFileArgs(files)
-                
+
                 cl = {"files": files, "fileArgs": fileArgs, "change": change, "description": d}
 
                 fileArgs = cl["fileArgs"]
@@ -4450,6 +4453,7 @@ class P4Sync(Command, P4UserMap):
                 system(["git", "symbolic-ref", head_ref, self.branch])
 
         return True
+
 
 class P4Rebase(Command):
     def __init__(self):
