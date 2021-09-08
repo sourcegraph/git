@@ -3946,6 +3946,10 @@ class P4Sync(Command, P4UserMap):
                     print("gitError output:", self.gitError.read())
                     cancelEvent.set()
                     break
+                except Exception as err:
+                    cancelEvent.set()
+                    logit("Exception: {}".format(err))
+                    traceback.print_exc()
 
                 cl = done.pop(changes[commited])
 
