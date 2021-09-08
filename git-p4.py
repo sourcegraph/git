@@ -42,7 +42,6 @@ import pprint
 import traceback
 import signal
 
-
 # On python2.7 where raw_input() and input() are both availble,
 # we want raw_input's semantics, but aliased to input for python3
 # compatibility
@@ -1119,6 +1118,13 @@ def createOrUpdateBranchesFromOrigin(localRefPrefix = "refs/remotes/p4/", silent
 def originP4BranchesExist():
         return gitBranchExists("origin") or gitBranchExists("origin/p4") or gitBranchExists("origin/p4/master")
 
+def get_timezone():
+    try:
+        tz = p4Cmd(["info"])['serverDate'].split()[2]
+    except IndexError:
+        print("Unable to determine server timezone, using local timezone")
+        tz = "%+03d%02d" % (- time.timezone / 3600, ((- time.timezone % 3600) / 60))
+    return tz
 
 def p4ParseNumericChangeRange(parts):
     changeStart = int(parts[0][1:])
@@ -2779,6 +2785,9 @@ def cloneExcludeCallback(option, opt_str, value, parser):
     # ("-//depot/A/..." becomes "/depot/A/..." after option parsing)
     parser.values.cloneExclude += ["/" + re.sub(r"\.\.\.$", "", value)]
 
+
+
+
 class P4Sync(Command, P4UserMap):
 
     def __init__(self):
@@ -2869,7 +2878,7 @@ class P4Sync(Command, P4UserMap):
         self.knownBranches = {}
         self.initialParents = {}
 
-        self.tz = "%+03d%02d" % (- time.timezone / 3600, ((- time.timezone % 3600) / 60))
+        self.tz = get_timezone()
         self.labels = {}
 
     # Force a checkpoint in fast-import and wait for it to finish
@@ -3370,7 +3379,7 @@ class P4Sync(Command, P4UserMap):
         self.gitStream.write("commit %s\n" % branch)
         self.gitStream.write("mark :%s\n" % details["change"])
         self.committedChanges.add(int(details["change"]))
-        committer = ""
+
         if author not in self.users:
             self.getUserMapFromPerforceServer()
         committer = "%s %s %s" % (self.make_email(author), epoch, self.tz)
@@ -4453,7 +4462,6 @@ class P4Sync(Command, P4UserMap):
                 system(["git", "symbolic-ref", head_ref, self.branch])
 
         return True
-
 
 class P4Rebase(Command):
     def __init__(self):
