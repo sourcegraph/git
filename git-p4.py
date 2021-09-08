@@ -3815,19 +3815,7 @@ class P4Sync(Command, P4UserMap):
             p4_describe_all(batch, cb=describeCb)
 
         # wait for all tasks to be completed or for a thread to stop
-        while (printQ.unfinished_tasks or commitQ.unfinished_tasks) and not cancelEvent.is_set():
-            time.sleep(0.1)
-
-        # if no thread triggered the cancelation event
-        # call join to ensure all tasks are actually done
-        if not cancelEvent.is_set():
-            printQ.join()
-            commitQ.join()
-        else:
-            logit("Clone canceled, gracefully exiting...")
-
-        # signal the threads that there is no more work to be done
-        cancelEvent.set()
+        cancelEvent.wait()
 
         # wait for all threads to end
         for t in threads:
@@ -3967,6 +3955,10 @@ class P4Sync(Command, P4UserMap):
                 logit("CL {}>: committed".format(changes[commited]), thread_name="Committer")
                 commited += 1
                 logit("Downloaded: %s / %s, Committed: %s / %s" % (downloaded, len(changes), commited, len(changes)), thread_name="Committer")
+            
+            if commited == len(changes):
+                cancelEvent.set()
+                return
 
     def importChanges(self, changes, origin_revision=0):
         cnt = 1
