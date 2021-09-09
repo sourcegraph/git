@@ -3367,6 +3367,13 @@ class P4Sync(Command, P4UserMap):
         if self.verbose:
             print('commit into {0}'.format(branch))
 
+        files = [f for f in files
+            if self.hasBranchPrefix(decode_path(f['path']))]
+        self.findShadowedFiles(files, details['change'])
+
+        if self.clientSpecDirs:
+            self.clientSpecDirs.update_client_spec_path_cache(files)
+
         files = [f for f in files if self.inClientSpec(decode_path(f['path']))]
 
         if gitConfigBool('git-p4.keepEmptyCommits'):
@@ -3380,6 +3387,7 @@ class P4Sync(Command, P4UserMap):
         self.gitStream.write("commit %s\n" % branch)
         self.gitStream.write("mark :%s\n" % details["change"])
         self.committedChanges.add(int(details["change"]))
+        committer = ""
 
         if author not in self.users:
             self.getUserMapFromPerforceServer()
@@ -3874,14 +3882,6 @@ class P4Sync(Command, P4UserMap):
                     logit("CL {}>: {}/{} -> p4 print done".format(task["change"], task["chunkId"], task["totalChunks"]))
                 else:
                     logit("CL {}>: {}/{} -> reuse cached file".format(task["change"], task["chunkId"], task["totalChunks"]))
-
-                if self.clientSpecDirs and task["chunkId"] == 1:
-                    logit("CL {}>: {}/{} -> p4 where".format(task["change"], task["chunkId"], task["totalChunks"]))
-                    task["files"] = [f for f in task["files"]
-                        if self.hasBranchPrefix(decode_path(f['path']))]
-                    self.findShadowedFiles(task["files"], task["description"]['change'])
-                    self.clientSpecDirs.update_client_spec_path_cache(task["files"])
-                    logit("CL {}>: {}/{} -> p4 where done".format(task["change"], task["chunkId"], task["totalChunks"]))
 
                 while not cancelEvent.is_set():
                     try:
