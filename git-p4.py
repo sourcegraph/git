@@ -41,6 +41,7 @@ import logging
 import pprint
 import traceback
 import signal
+import pprint
 
 # On python2.7 where raw_input() and input() are both availble,
 # we want raw_input's semantics, but aliased to input for python3
@@ -3958,6 +3959,7 @@ class P4Sync(Command, P4UserMap):
                     print("IO error with git fast-import. Is your git version recent enough?")
                     print("IO error details: {}".format(err))
                     print("gitError output:", self.gitError.read())
+                    pprint.pprint(toCommit)
                     cancelEvent.set()
                     break
                 except ValueError as err:
@@ -3965,6 +3967,7 @@ class P4Sync(Command, P4UserMap):
                     print("Value error with git fast-import")
                     print("Value error details: {}".format(err))
                     print("gitError output:", self.gitError.read())
+                    pprint.pprint(toCommit)
                     cancelEvent.set()
                     break
                 except Exception as err:
