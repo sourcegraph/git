@@ -62,6 +62,10 @@ logging.basicConfig(
 # Only labels/tags matching this will be imported/exported
 defaultLabelRegexp = r'[a-zA-Z0-9_\-.]+$'
 
+# Valid email regex
+validEmail = r"(^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$)"
+email_validator = re.compile(validEmail)
+
 # The block size is reduced automatically if required
 defaultBlockSize = 1<<20
 
@@ -2819,7 +2823,9 @@ class P4Sync(Command, P4UserMap):
                 optparse.make_option("--tmp-dir", dest="tempDir", help="Directory to store temporary files"),
                 optparse.make_option("--keep-tmp-files", dest="keepTempFiles", help="Do not remove temporary files after commit", action="store_true"),
                 optparse.make_option("--no-disk-free-check", dest="noDiskFreeCheck", action='store_true',
-                            help="Skip checking if enough free disk space is availaible")
+                            help="Skip checking if enough free disk space is availaible"),
+                optparse.make_option("--fake-emails", dest="allowfakeEmails",help="Allow git-p4 to create user emails when not found",
+                                     action='store_true', )
         ]
         self.description = """Imports from Perforce into a git repository.\n
     example:
@@ -2859,6 +2865,7 @@ class P4Sync(Command, P4UserMap):
         self.describeBatchSize = 100
         self.tempDir = ""
         self.keepTempFiles = False
+        self.allowFakeEmails = False
 
         if gitConfig('git-p4.largeFileSystem'):
             largeFileSystemConstructor = globals()[gitConfig('git-p4.largeFileSystem')]
@@ -3266,9 +3273,19 @@ class P4Sync(Command, P4UserMap):
 
     def make_email(self, userid):
         if userid in self.users:
-            return self.users[userid]
+            if(email_validator.fullmatch(self.users[userid])):
+                return self.users[userid]
+            elif(gitConfigBool("gitp4.createFakeEmail") or self.allowFakeEmails ):
+                return "%s <%s@%s.invalid>" % userid
+            else:
+                die(f"No valid email found for user {userid} ({self.users[userid]}), set 'gitp4.createFakeEmail' or pass --fake-emails to proceed")
         else:
-            return "%s <%s@%s.invalid>" % userid
+            if verbose:
+                print(f"No user found for user:{userid} ")
+            if (gitConfigBool("gitp4.createFakeEmail") or self.allowFakeEmails):
+                return "%s <%s@%s.invalid>" % userid
+            else:
+                die(f"No valid email found for user {userid} ({self.users[userid]}), set 'gitp4.createFakeEmail' or pass --fake-emails to proceed")
 
     def streamTag(self, gitStream, labelName, labelDetails, commit, epoch):
         """ Stream a p4 tag.
