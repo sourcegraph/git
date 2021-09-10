@@ -3276,15 +3276,20 @@ class P4Sync(Command, P4UserMap):
             if(email_validator.fullmatch(self.users[userid])):
                 return self.users[userid]
             elif(gitConfigBool("gitp4.createFakeEmail") or self.allowFakeEmails ):
-                return "%s <%s@%s.invalid>" % userid
+                try:
+                    return f"{userid} {self.users[userid].split()[1]}.invalid>"
+                except IndexError:
+                    return f"{userid} {userid}@{userid}.invalid>"
             else:
+                signal.raise_signal(signal.SIGINT) # needed to stop all threads
                 die(f"No valid email found for user {userid} ({self.users[userid]}), set 'gitp4.createFakeEmail' or pass --fake-emails to proceed")
         else:
             if verbose:
-                print(f"No user found for user:{userid} ")
+                print(f"No user found for user:{userid}")
             if (gitConfigBool("gitp4.createFakeEmail") or self.allowFakeEmails):
                 return "%s <%s@%s.invalid>" % userid
             else:
+                signal.raise_signal(signal.SIGINT) # needed to stop all threads
                 die(f"No valid email found for user {userid} ({self.users[userid]}), set 'gitp4.createFakeEmail' or pass --fake-emails to proceed")
 
     def streamTag(self, gitStream, labelName, labelDetails, commit, epoch):
