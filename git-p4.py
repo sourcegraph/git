@@ -3277,7 +3277,9 @@ class P4Sync(Command, P4UserMap):
                 return self.users[userid]
             elif(gitConfigBool("gitp4.createFakeEmail") or self.allowFakeEmails ):
                 try:
-                    return f"{userid} {self.users[userid].split()[1]}.invalid>"
+                    email = self.users[userid].split()[1]
+                    email = email[:-1] + ".invalid" + ">"
+                    return f"{userid} {email}"
                 except IndexError:
                     return f"{userid} {userid}@{userid}.invalid>"
             else:
