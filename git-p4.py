@@ -2824,7 +2824,7 @@ class P4Sync(Command, P4UserMap):
                 optparse.make_option("--keep-tmp-files", dest="keepTempFiles", help="Do not remove temporary files after commit", action="store_true"),
                 optparse.make_option("--no-disk-free-check", dest="noDiskFreeCheck", action='store_true',
                             help="Skip checking if enough free disk space is availaible"),
-                optparse.make_option("--fake-emails", dest="allowfakeEmails",help="Allow git-p4 to create user emails when not found",
+                optparse.make_option("--fake-emails", dest="allowFakeEmails",help="Allow git-p4 to create user emails when not found",
                                      action='store_true', )
         ]
         self.description = """Imports from Perforce into a git repository.\n
