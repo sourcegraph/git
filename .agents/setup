@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+packages='
+	apache2
+	cargo
+	cvs
+	cvsps
+	default-jre
+	gettext
+	git
+	gnupg
+	libauthen-sasl-perl
+	libcgi-pm-perl
+	libcurl4-openssl-dev
+	libdbd-sqlite3-perl
+	libemail-valid-perl
+	liberror-perl
+	libexpat1-dev
+	libio-pty-perl
+	libio-socket-ssl-perl
+	libnet-smtp-ssl-perl
+	libpcre2-dev
+	libsecret-1-dev
+	libssl-dev
+	libsvn-perl
+	locales-all
+	meson
+	ninja-build
+	perl
+	pkg-config
+	python3
+	subversion
+	sudo
+	tcl
+	tk
+	wget
+	zlib1g-dev
+'
+
+missing=
+for package in $packages
+do
+	if ! dpkg-query -W -f='${db:Status-Abbrev}' "$package" 2>/dev/null | grep -q '^ii '; then
+		missing="$missing $package"
+	fi
+done
+
+if test -n "$missing"
+then
+	start=$SECONDS
+	echo "Installing missing system packages..."
+	sudo apt-get update -q
+	# Package names are fixed above and intentionally split here.
+	# shellcheck disable=SC2086
+	sudo env DEBIAN_FRONTEND=noninteractive apt-get install -q -y --no-install-recommends $missing
+	echo "System packages installed in $((SECONDS - start))s."
+else
+	echo "System packages are already installed."
+fi
+
+start=$SECONDS
+echo "Building Git..."
+make -j"$(getconf _NPROCESSORS_ONLN)" all
+echo "Git built in $((SECONDS - start))s."
