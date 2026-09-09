@@ -28,30 +28,72 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: test "$(uname -m)" = x86_64
+      - name: Configure branded version
+        run: |
+          . contrib/sourcegraph/packaging/release.sh
+          echo "GIT_VERSION=$GIT_VERSION" >>"$GITHUB_ENV"
       - run: ci/install-dependencies.sh
         env:
           CUSTOM_PATH: ${{ runner.temp }}/custom
       - run: ci/run-build-and-tests.sh
+      - run: test "$(./git --version)" = "git version $GIT_VERSION"
       - if: failure() && env.FAILED_TEST_ARTIFACTS != ''
         run: ci/print-test-failures.sh
 
   darwin:
     name: Darwin ARM64 build and test
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       CC: clang
-      CI_JOB_IMAGE: macos-14
+      CI_JOB_IMAGE: macos-15
       jobname: osx-clang
       TEST_OUTPUT_DIRECTORY: ${{ github.workspace }}/t
     steps:
       - uses: actions/checkout@v6
       - run: test "$(uname -m)" = arm64
+      - run: test "$(sw_vers -productVersion | cut -d. -f1)" = 15
+      - name: Configure branded version
+        run: |
+          . contrib/sourcegraph/packaging/release.sh
+          echo "GIT_VERSION=$GIT_VERSION" >>"$GITHUB_ENV"
       - run: ci/install-dependencies.sh
         env:
           CUSTOM_PATH: ${{ runner.temp }}/custom
       - run: ci/run-build-and-tests.sh
+      - run: test "$(./git --version)" = "git version $GIT_VERSION"
       - if: failure() && env.FAILED_TEST_ARTIFACTS != ''
         run: ci/print-test-failures.sh
+
+  darwin-archive:
+    name: Darwin ARM64 archive
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - run: test "$(uname -m)" = arm64
+      - run: test "$(sw_vers -productVersion | cut -d. -f1)" = 15
+      - name: Install build dependencies
+        run: |
+          brew install gnu-tar
+          command -v rustc
+          command -v cargo
+          command -v gtar
+      - name: Build archive from exact recipe head
+        run: ./contrib/sourcegraph/packaging/build-darwin.sh artifacts
+      - name: Validate archive
+        run: |
+          ./contrib/sourcegraph/packaging/validate-darwin-archive.sh \
+            artifacts/git-sourcegraph-v2.55.0-2-darwin-arm64.tar.gz
+      - uses: actions/upload-artifact@v6
+        with:
+          name: git-sourcegraph-v2.55.0-2-darwin-arm64
+          path: |
+            artifacts/git-sourcegraph-v2.55.0-2-darwin-arm64.tar.gz
+            artifacts/git-sourcegraph-v2.55.0-2-darwin-arm64.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7
 
   fork-policy:
     name: Fork and packaging policy
@@ -73,8 +115,10 @@ jobs:
             do
               sh -n "$script"
             done
-            grep -Fx 'SOURCE_TAG=v2.55.0' contrib/sourcegraph/packaging/build-linux.sh
-            grep -Fx 'SOURCE_COMMIT=e9019fcafe0040228b8631c30f97ae1adb61bcdc' contrib/sourcegraph/packaging/build-linux.sh
-            grep -Fx 'RELEASE_VERSION=v2.55.0-1' contrib/sourcegraph/packaging/build-linux.sh
+            . contrib/sourcegraph/packaging/release.sh
+            test "$SOURCE_TAG" = v2.55.0
+            test "$SOURCE_COMMIT" = e9019fcafe0040228b8631c30f97ae1adb61bcdc
+            test "$RELEASE_VERSION" = v2.55.0-2
+            test "$GIT_VERSION" = 2.55.0.sourcegraph.2
             grep -F 'FROM debian:12@sha256:' contrib/sourcegraph/packaging/Dockerfile.linux
           }

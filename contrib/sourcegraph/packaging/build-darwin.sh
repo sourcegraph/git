@@ -1,9 +1,6 @@
 #!/bin/sh
 set -eu
 
-SOURCE_TAG=v2.55.0
-SOURCE_COMMIT=e9019fcafe0040228b8631c30f97ae1adb61bcdc
-RELEASE_VERSION=v2.55.0-1
 PCRE2_VERSION=10.48
 PCRE2_SHA256=b6c68fdf6f3ac31388b50aa89ff0fc49c00c987c16e7b5146491d12003f2c8ed
 
@@ -13,6 +10,7 @@ test "$(uname -s)" = Darwin && test "$(uname -m)" = arm64 || {
 }
 
 root=$(git rev-parse --show-toplevel)
+. "$root/contrib/sourcegraph/packaging/release.sh"
 output=${1:-"$root/artifacts"}
 RECIPE_COMMIT=$(git -C "$root" rev-parse HEAD)
 actual=$(git -C "$root" rev-parse "$SOURCE_TAG^{commit}")
@@ -57,7 +55,7 @@ fi
 export DEVELOPER_DIR
 SDKROOT=$(/usr/bin/xcrun --sdk macosx --show-sdk-path)
 export SDKROOT
-MACOSX_DEPLOYMENT_TARGET=${SOURCEGRAPH_GIT_DEPLOYMENT_TARGET:-14.0}
+MACOSX_DEPLOYMENT_TARGET=${SOURCEGRAPH_GIT_DEPLOYMENT_TARGET:-15.0}
 export MACOSX_DEPLOYMENT_TARGET
 CC=$(/usr/bin/xcrun --find clang)
 AR=$(/usr/bin/xcrun --find ar)
@@ -93,8 +91,7 @@ pcre_prefix="$work/pcre2-install"
 (
 	cd "$work"
 	SOURCE_DATE_EPOCH=$(git -C "$root" show -s --format=%ct "$SOURCE_COMMIT") \
-	SOURCE_COMMIT="$SOURCE_COMMIT" SOURCE_TAG="$SOURCE_TAG" \
-	RECIPE_COMMIT="$RECIPE_COMMIT" RELEASE_VERSION="$RELEASE_VERSION" \
+	RECIPE_COMMIT="$RECIPE_COMMIT" \
 	PCRE2_PREFIX="$pcre_prefix" \
 	PCRE2_LICENSE="$work/pcre2-$PCRE2_VERSION/LICENCE.md" \
 	SOURCE_BUILD_ROOT="$work" \

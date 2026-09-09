@@ -1,8 +1,10 @@
 #!/bin/sh
 set -eu
 
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
+. "$script_dir/release.sh"
+
 archive=${1:?usage: validate-linux-archive.sh ARCHIVE}
-expected_commit=e9019fcafe0040228b8631c30f97ae1adb61bcdc
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 
@@ -16,8 +18,14 @@ do
 	git="$work/$location/bin/git"
 	test -s "$work/$location/LICENSES/Git-COPYING"
 	test -s "$work/$location/BUNDLED-LIBRARIES"
-	test "$($git --version)" = 'git version 2.55.0'
-	$git version --build-options | grep -F "built from commit: $expected_commit"
+	test "$($git --version)" = "git version $GIT_VERSION"
+	$git version --build-options | grep -F "built from commit: $SOURCE_COMMIT"
+	grep -Fx "release_version=$RELEASE_VERSION" "$work/$location/BUILD-INFO"
+	grep -Fx "upstream_version=$UPSTREAM_VERSION" "$work/$location/BUILD-INFO"
+	grep -Fx "release_revision=$RELEASE_REVISION" "$work/$location/BUILD-INFO"
+	grep -Fx "source_tag=$SOURCE_TAG" "$work/$location/BUILD-INFO"
+	grep -Fx "source_commit=$SOURCE_COMMIT" "$work/$location/BUILD-INFO"
+	grep -Ex 'recipe_commit=[0-9a-f]{40}' "$work/$location/BUILD-INFO"
 	test "$($git --exec-path)" = "$work/$location/libexec/git-core"
 	test "$($git --html-path)" = "$work/$location/share/doc/git-doc"
 

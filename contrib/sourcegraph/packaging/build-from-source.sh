@@ -1,12 +1,12 @@
 #!/bin/sh
 set -eu
 
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
+. "$script_dir/release.sh"
+
 platform=${1:?usage: build-from-source.sh PLATFORM [OUTPUT]}
 output=${2:-/out}
-: "${SOURCE_COMMIT:?SOURCE_COMMIT is required}"
-: "${SOURCE_TAG:?SOURCE_TAG is required}"
 : "${RECIPE_COMMIT:?RECIPE_COMMIT is required}"
-: "${RELEASE_VERSION:?RELEASE_VERSION is required}"
 : "${SOURCE_DATE_EPOCH:?SOURCE_DATE_EPOCH is required}"
 
 stage=$(mktemp -d)
@@ -44,11 +44,15 @@ mkdir -p "$prefix" "$output"
 make clean
 # shellcheck disable=SC2086
 make -j"$(getconf _NPROCESSORS_ONLN)" $make_options \
-	prefix=/ sysconfdir=/etc GIT_VERSION=2.55.0 \
+	prefix=/ sysconfdir=/etc GIT_VERSION="$GIT_VERSION" \
 	GIT_BUILT_FROM_COMMIT="$SOURCE_COMMIT" all
 # shellcheck disable=SC2086
-make $make_options prefix=/ sysconfdir=/etc GIT_VERSION=2.55.0 \
+make $make_options prefix=/ sysconfdir=/etc GIT_VERSION="$GIT_VERSION" \
 	GIT_BUILT_FROM_COMMIT="$SOURCE_COMMIT" DESTDIR="$prefix" install
+
+test "$($prefix/bin/git --version)" = "git version $GIT_VERSION"
+$prefix/bin/git version --build-options |
+	grep -F "built from commit: $SOURCE_COMMIT"
 
 mkdir "$prefix/LICENSES"
 cp COPYING "$prefix/LICENSES/Git-COPYING"
@@ -63,7 +67,7 @@ then
 	cp "$pcre2_license" "$prefix/LICENSES/PCRE2-LICENCE"
 	# The keychain helper is intentionally included in the full Mac install.
 	# shellcheck disable=SC2086
-	make $make_options prefix=/ sysconfdir=/etc GIT_VERSION=2.55.0 \
+	make $make_options prefix=/ sysconfdir=/etc GIT_VERSION="$GIT_VERSION" \
 		GIT_BUILT_FROM_COMMIT="$SOURCE_COMMIT" DESTDIR="$prefix" \
 		install-git-credential-osxkeychain
 	contrib/sourcegraph/packaging/verify-darwin-dependencies.sh "$prefix"
@@ -73,6 +77,8 @@ fi
 
 {
 	echo "release_version=$RELEASE_VERSION"
+	echo "upstream_version=$UPSTREAM_VERSION"
+	echo "release_revision=$RELEASE_REVISION"
 	echo "source_tag=$SOURCE_TAG"
 	echo "source_commit=$SOURCE_COMMIT"
 	echo "recipe_commit=$RECIPE_COMMIT"
