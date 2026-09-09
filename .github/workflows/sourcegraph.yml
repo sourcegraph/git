@@ -1,0 +1,80 @@
+name: Sourcegraph CI
+
+on:
+  push:
+    branches: [k/sourcegraph]
+  pull_request:
+    branches: [k/sourcegraph]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sourcegraph-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEVELOPER: 1
+
+jobs:
+  linux:
+    name: Linux AMD64 build and test
+    runs-on: ubuntu-24.04
+    env:
+      CC: gcc
+      CI_JOB_IMAGE: ubuntu-24.04
+      jobname: linux-sourcegraph
+      TEST_OUTPUT_DIRECTORY: ${{ github.workspace }}/t
+    steps:
+      - uses: actions/checkout@v6
+      - run: test "$(uname -m)" = x86_64
+      - run: ci/install-dependencies.sh
+        env:
+          CUSTOM_PATH: ${{ runner.temp }}/custom
+      - run: ci/run-build-and-tests.sh
+      - if: failure() && env.FAILED_TEST_ARTIFACTS != ''
+        run: ci/print-test-failures.sh
+
+  darwin:
+    name: Darwin ARM64 build and test
+    runs-on: macos-14
+    env:
+      CC: clang
+      CI_JOB_IMAGE: macos-14
+      jobname: osx-clang
+      TEST_OUTPUT_DIRECTORY: ${{ github.workspace }}/t
+    steps:
+      - uses: actions/checkout@v6
+      - run: test "$(uname -m)" = arm64
+      - run: ci/install-dependencies.sh
+        env:
+          CUSTOM_PATH: ${{ runner.temp }}/custom
+      - run: ci/run-build-and-tests.sh
+      - if: failure() && env.FAILED_TEST_ARTIFACTS != ''
+        run: ci/print-test-failures.sh
+
+  fork-policy:
+    name: Fork and packaging policy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify linear history and whitespace
+        run: |
+          test "$(git rev-parse v2.55.0^{commit})" = e9019fcafe0040228b8631c30f97ae1adb61bcdc
+          test -z "$(git rev-list --merges v2.55.0..HEAD)"
+          git log --check v2.55.0..HEAD
+      - name: Verify packaging scripts and release identity
+        run: |
+          test ! -d contrib/sourcegraph/packaging || {
+            for script in contrib/sourcegraph/packaging/*.sh
+            do
+              sh -n "$script"
+            done
+            grep -Fx 'SOURCE_TAG=v2.55.0' contrib/sourcegraph/packaging/build-linux.sh
+            grep -Fx 'SOURCE_COMMIT=e9019fcafe0040228b8631c30f97ae1adb61bcdc' contrib/sourcegraph/packaging/build-linux.sh
+            grep -Fx 'RELEASE_VERSION=v2.55.0-1' contrib/sourcegraph/packaging/build-linux.sh
+            grep -F 'FROM debian:12@sha256:' contrib/sourcegraph/packaging/Dockerfile.linux
+          }
