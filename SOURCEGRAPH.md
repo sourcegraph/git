@@ -19,11 +19,11 @@ Release tags use `sourcegraph/v<upstream-version>-<revision>`, for example
 packaging, or rebuild releases on the same upstream baseline, and resets to 1
 when the upstream version changes. Tags and assets are immutable. Release
 metadata records the corresponding Git source and packaging recipe commits
-separately. Git's reported version remains the upstream numeric version
-(`2.55.0` today) for consumer parser compatibility. The release, archive, and
-`BUILD-INFO` carry the downstream identity; `git version --build-options`
-identifies the compiled source commit. Any branded Git version suffix requires
-explicit build and consumer-parser validation first.
+separately. Starting with `sourcegraph/v2.55.0-2`, the tag maps to Git output
+`2.55.0.sourcegraph.2`; in general, tag revision `N` maps to the dotted suffix
+`.sourcegraph.N`. The immutable first release is the exception: it reports
+plain `2.55.0`. `BUILD-INFO` carries the downstream identity, and
+`git version --build-options` identifies the compiled source commit.
 
 Distribution has three separate owners:
 
