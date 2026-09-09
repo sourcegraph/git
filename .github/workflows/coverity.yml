@@ -1,4 +1,4 @@
-name: Coverity
+name: Coverity (upstream, manual)
 
 # This GitHub workflow automates submitting builds to Coverity Scan. To enable it,
 # set the repository variable `ENABLE_COVERITY_SCAN_FOR_BRANCHES` (for details, see
@@ -19,8 +19,7 @@ name: Coverity
 # By default, the builds are submitted to the Coverity project `git`. To override this,
 # set the repository variable `COVERITY_PROJECT`.
 
-on:
-  push:
+on: [workflow_dispatch]
 
 defaults:
   run:
