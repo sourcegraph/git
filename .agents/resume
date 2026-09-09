@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# This repository has no persistent services or per-thread authentication to
+# restore. Keep wake-up fast while retaining the lifecycle hook for future use.
+echo "Git development environment is ready."
