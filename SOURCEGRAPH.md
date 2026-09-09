@@ -1,24 +1,27 @@
 # Sourcegraph Git fork
 
-`master` follows upstream Git. `k/sourcegraph` carries Sourcegraph changes as a
-linear patch series based on a deliberately selected upstream release or
-revision. Target downstream pull requests there. The current experiment is
-based on upstream `v2.55.0`, commit
-`e9019fcafe0040228b8631c30f97ae1adb61bcdc`, and contains no Git behavior
+`master` follows upstream Git. `sourcegraph` carries Sourcegraph changes as a
+linear patch series based on an upstream stable release tag. Target downstream
+pull requests there. The current experiment is based on upstream `v2.55.0`,
+commit `e9019fcafe0040228b8631c30f97ae1adb61bcdc`, and contains no Git behavior
 changes.
 
 Keep each downstream change as a small, rebasable commit with no merge commits.
-Develop topics from `k/sourcegraph` and squash them to one coherent commit when
-merging. To change the upstream baseline, coordinate the update, rebase the
-series, and review `git range-diff` before force-pushing with an exact lease.
-Leave `master` untouched by downstream patches.
+Develop topics from `sourcegraph` and squash them to one coherent commit when
+merging. For each release, select or retain an upstream stable release tag,
+rebase the downstream series onto it, review `git range-diff`, run tests, and
+build the artifacts before tagging the tested downstream tip. Never base a
+release on an arbitrary upstream `master` revision, tag the upstream commit, or
+put downstream patches on `master`.
 
-Release tags are immutable and namespaced, for example
-`sourcegraph/v2.55.0-1`. Release metadata must record both the exact Git source
-commit and the recipe revision that produced an artifact. Packaging-only
-commits do not change the current source identity. Future behavior patches must
-be included in the source being built; do not bypass them with a hard-coded
-older upstream commit when advancing the patch series.
+Release tags use `sourcegraph/v<upstream-version>-<revision>`, for example
+`sourcegraph/v2.55.0-2`. The revision starts at 1, increments for behavior,
+packaging, or rebuild releases on the same upstream baseline, and resets to 1
+when the upstream version changes. Tags and assets are immutable. Release
+metadata records the corresponding Git source and packaging recipe commits
+separately. Future builds should report a downstream Git version such as
+`2.55.0.sourcegraph.2`; the immutable first release reports plain `2.55.0` and
+records its downstream identity in `BUILD-INFO`.
 
 Distribution has three separate owners:
 

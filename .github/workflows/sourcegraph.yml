@@ -2,9 +2,9 @@ name: Sourcegraph CI
 
 on:
   push:
-    branches: [k/sourcegraph]
+    branches: [sourcegraph]
   pull_request:
-    branches: [k/sourcegraph]
+    branches: [sourcegraph]
 
 permissions:
   contents: read

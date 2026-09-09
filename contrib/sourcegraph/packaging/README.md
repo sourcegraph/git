@@ -6,7 +6,7 @@ export the exact upstream-compatible `v2.55.0` source at commit
 `e9019fcafe0040228b8631c30f97ae1adb61bcdc`, regardless of the branch from
 which the packaging script runs.
 
-The intended immutable downstream release is `sourcegraph/v2.55.0-1`. A
+The current immutable downstream release is `sourcegraph/v2.55.0-1`. A
 release consists of exactly these files:
 
 * `git-sourcegraph-v2.55.0-1-linux-amd64.tar.gz`
