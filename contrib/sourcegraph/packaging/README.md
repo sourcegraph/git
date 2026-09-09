@@ -6,15 +6,16 @@ export the exact upstream-compatible `v2.55.0` source at commit
 `e9019fcafe0040228b8631c30f97ae1adb61bcdc`, regardless of the branch from
 which the packaging script runs.
 
-The next immutable downstream release is `sourcegraph/v2.55.0-2`, whose Git
-binary reports `2.55.0.sourcegraph.2`. It consists of exactly these files:
+The next immutable downstream release is `sourcegraph/v2.55.0-3`, whose Git
+binary reports `2.55.0.sourcegraph.3`. It follows the stock-zlib
+`sourcegraph/v2.55.0-2` release and consists of exactly these files:
 
-* `git-sourcegraph-v2.55.0-2-linux-amd64.tar.gz`
-* `git-sourcegraph-v2.55.0-2-linux-amd64.tar.gz.sha256`
-* `git-sourcegraph-v2.55.0-2-darwin-arm64.tar.gz`
-* `git-sourcegraph-v2.55.0-2-darwin-arm64.tar.gz.sha256`
+* `git-sourcegraph-v2.55.0-3-linux-amd64.tar.gz`
+* `git-sourcegraph-v2.55.0-3-linux-amd64.tar.gz.sha256`
+* `git-sourcegraph-v2.55.0-3-darwin-arm64.tar.gz`
+* `git-sourcegraph-v2.55.0-3-darwin-arm64.tar.gz.sha256`
 
-The existing `sourcegraph/v2.55.0-1` tag and assets remain immutable.
+Existing downstream tags and assets remain immutable.
 
 Each archive has one `git-sourcegraph/` root. Stripping that directory exposes
 `bin/`, `libexec/`, `share/`, optional `lib/`, and `BUILD-INFO`. The latter
@@ -37,13 +38,16 @@ Install Docker, then run:
 ```console
 ./contrib/sourcegraph/packaging/build-linux.sh
 ./contrib/sourcegraph/packaging/validate-linux-archive.sh \
-  artifacts/git-sourcegraph-v2.55.0-2-linux-amd64.tar.gz
+  artifacts/git-sourcegraph-v2.55.0-3-linux-amd64.tar.gz
 ```
 
 The builder image starts from Debian 12 at a pinned multi-platform image
 digest. `BUILD-INFO` captures the selected amd64 image's installed package
 versions. The archive bundles the non-glibc dynamic dependency closure and
 uses relative ELF RPATHs; glibc itself remains at Debian 12's 2.36 baseline.
+Git links a checksum-pinned zlib-ng 2.3.3 static library built with its native
+API, allowing its optimized implementation to coexist with ordinary zlib used
+by other dependencies without adding a runtime library requirement.
 Installed executables are stripped without removing features.
 Git's Rust components remain enabled and are built with Debian's Rust toolchain.
 The build container uses the invoking user's numeric UID and GID so bind-mount
@@ -62,7 +66,7 @@ xcode-select --install # if the tools are not already installed
 brew install rust gnu-tar
 ./contrib/sourcegraph/packaging/build-darwin.sh
 ./contrib/sourcegraph/packaging/validate-darwin-archive.sh \
-  artifacts/git-sourcegraph-v2.55.0-2-darwin-arm64.tar.gz
+  artifacts/git-sourcegraph-v2.55.0-3-darwin-arm64.tar.gz
 ```
 
 The `Darwin ARM64 archive` job runs the same commands on GitHub's macOS 15
@@ -80,6 +84,8 @@ it statically for the same target. Git uses the macOS SDK's curl, iconv, and
 system libraries. Localization is disabled because macOS has no system libintl
 and linking an incidental Homebrew gettext would make the archive depend on
 the build machine. Git still includes its English fallthrough messages.
+The builder also downloads and statically links the same checksum-pinned
+zlib-ng 2.3.3 native library used by the Linux archive.
 
 The full install includes `git-credential-osxkeychain`, rejects non-system
 Mach-O dependencies (including `/opt/homebrew` and build paths), verifies
@@ -104,12 +110,13 @@ binary metadata, not a promise of runtime support for that older macOS release.
 
 ## License notices
 
-Both archives include Git's `COPYING` under `LICENSES/`. Darwin also includes
-the pinned PCRE2 source's `LICENCE`. Linux includes Debian's copyright notice
-for every package whose shared library is copied into `lib/`, while
+Both archives include Git's `COPYING` and zlib-ng's `LICENSE.md` under
+`LICENSES/`. Darwin also includes the pinned PCRE2 source's `LICENCE`. Linux
+includes Debian's copyright notice for every package whose shared library is
+copied into `lib/`, while
 `BUNDLED-LIBRARIES` records each library's exact binary and source package
 versions and a Debian source-retrieval link. References to Debian's
 `/usr/share/common-licenses` resolve within `LICENSES/debian/common-licenses`.
 System libraries referenced by the Darwin archive are not redistributed.
-Release notes should link the exact Git and PCRE2 sources; checksum sidecars
-are checksums, not signatures.
+Release notes should link the exact Git, PCRE2, and zlib-ng sources; checksum
+sidecars are checksums, not signatures.

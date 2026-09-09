@@ -24,16 +24,23 @@ validate_prefix() {
 	git="$prefix/bin/git"
 	test -s "$prefix/LICENSES/Git-COPYING"
 	test -s "$prefix/LICENSES/PCRE2-LICENCE"
+	test -s "$prefix/LICENSES/Zlib-ng-LICENSE"
 	test "$("$git" --version)" = "git version $GIT_VERSION"
 	build_options=$("$git" version --build-options)
 	printf '%s\n' "$build_options" | grep -F "built from commit: $SOURCE_COMMIT"
 	printf '%s\n' "$build_options" | grep -F 'rust: enabled'
+	printf '%s\n' "$build_options" | grep -Fx 'zlib-ng: 2.3.3'
 	grep -Fx "release_version=$RELEASE_VERSION" "$prefix/BUILD-INFO"
 	grep -Fx "upstream_version=$UPSTREAM_VERSION" "$prefix/BUILD-INFO"
 	grep -Fx "release_revision=$RELEASE_REVISION" "$prefix/BUILD-INFO"
 	grep -Fx "source_tag=$SOURCE_TAG" "$prefix/BUILD-INFO"
 	grep -Fx "source_commit=$SOURCE_COMMIT" "$prefix/BUILD-INFO"
 	grep -Fx "recipe_commit=$expected_recipe" "$prefix/BUILD-INFO"
+	grep -Fx 'zlib_ng_version=2.3.3' "$prefix/BUILD-INFO"
+	grep -Fx 'zlib_ng_source_commit=12731092979c6d07f42da27da673a9f6c7b13586' \
+		"$prefix/BUILD-INFO"
+	grep -Fx 'zlib_ng_source_sha256=a0d2a5d122c84b56a793a1553a9c3327fb2eb7469bf7a86b79e3c7be5d92e8d6' \
+		"$prefix/BUILD-INFO"
 	test "$("$git" --exec-path)" = "$prefix/libexec/git-core"
 	test "$("$git" --html-path)" = "$prefix/share/doc/git-doc"
 
@@ -90,6 +97,16 @@ do
 		echo "error: build-machine path embedded in $executable" >&2
 		echo failed >>"$status_file"
 	fi
+	otool -l "$executable" | awk '
+		$1 == "cmd" && $2 == "LC_RPATH" { found = 1; next }
+		found && $1 == "path" { print $2; found = 0 }
+	' | while IFS= read -r rpath
+	do
+		case "$rpath" in
+			/System/Library/*|/usr/lib/*) ;;
+			*) echo "error: non-system rpath in $executable: $rpath" >&2; echo failed >>"$status_file" ;;
+		esac
+	done
 	otool -L "$executable" | tail -n +2 | awk '{ print $1 }' | while IFS= read -r library
 	do
 		case "$library" in

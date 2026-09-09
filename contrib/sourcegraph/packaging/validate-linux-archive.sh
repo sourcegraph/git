@@ -17,15 +17,22 @@ do
 	tar -xzf "$archive" -C "$work/$location" --strip-components=1
 	git="$work/$location/bin/git"
 	test -s "$work/$location/LICENSES/Git-COPYING"
+	test -s "$work/$location/LICENSES/Zlib-ng-LICENSE"
 	test -s "$work/$location/BUNDLED-LIBRARIES"
 	test "$($git --version)" = "git version $GIT_VERSION"
 	$git version --build-options | grep -F "built from commit: $SOURCE_COMMIT"
+	$git version --build-options | grep -Fx 'zlib-ng: 2.3.3'
 	grep -Fx "release_version=$RELEASE_VERSION" "$work/$location/BUILD-INFO"
 	grep -Fx "upstream_version=$UPSTREAM_VERSION" "$work/$location/BUILD-INFO"
 	grep -Fx "release_revision=$RELEASE_REVISION" "$work/$location/BUILD-INFO"
 	grep -Fx "source_tag=$SOURCE_TAG" "$work/$location/BUILD-INFO"
 	grep -Fx "source_commit=$SOURCE_COMMIT" "$work/$location/BUILD-INFO"
 	grep -Ex 'recipe_commit=[0-9a-f]{40}' "$work/$location/BUILD-INFO"
+	grep -Fx 'zlib_ng_version=2.3.3' "$work/$location/BUILD-INFO"
+	grep -Fx 'zlib_ng_source_commit=12731092979c6d07f42da27da673a9f6c7b13586' \
+		"$work/$location/BUILD-INFO"
+	grep -Fx 'zlib_ng_source_sha256=a0d2a5d122c84b56a793a1553a9c3327fb2eb7469bf7a86b79e3c7be5d92e8d6' \
+		"$work/$location/BUILD-INFO"
 	test "$($git --exec-path)" = "$work/$location/libexec/git-core"
 	test "$($git --html-path)" = "$work/$location/share/doc/git-doc"
 
@@ -40,6 +47,10 @@ do
 	GIT_CONFIG_SYSTEM=/dev/null HOME="$home" "$git" -C "$work/repository" grep -P 'n(?=eedle)'
 	rm -rf "$work/repository"
 done
+
+# zlib-ng is linked statically so the relocatable archive does not gain a new
+# runtime dependency or risk loading a host-provided version.
+! ldd "$work/second/moved/prefix/bin/git" | grep -q 'libz-ng'
 
 # Every bundled shared library identifies its exact Debian binary/source
 # package, source retrieval location, and included copyright notice.
