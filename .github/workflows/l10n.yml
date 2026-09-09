@@ -1,6 +1,6 @@
-name: git-l10n
+name: git-l10n (upstream, manual)
 
-on: [push, pull_request_target]
+on: [workflow_dispatch]
 
 # Avoid unnecessary builds. Unlike the main CI jobs, these are not
 # ci-configurable (but could be).
