@@ -1,0 +1,10 @@
+FROM debian:12@sha256:6ebd97fa83deb272194a2cf015b3d26a4d538e9ad3a7a79d544c8af5b0a01443
+
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      build-essential ca-certificates cargo file gettext libcurl4-openssl-dev \
+      libexpat1-dev libpcre2-dev libssl-dev patchelf perl tcl tk zlib1g-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+ENTRYPOINT ["contrib/sourcegraph/packaging/build-from-source.sh", "linux-amd64"]
