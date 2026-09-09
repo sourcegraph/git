@@ -1,5 +1,8 @@
 [![Build status](https://github.com/git/git/workflows/CI/badge.svg)](https://github.com/git/git/actions?query=branch%3Amaster+event%3Apush)
 
+Sourcegraph's fork workflow and distribution paths are documented in
+[SOURCEGRAPH.md](SOURCEGRAPH.md).
+
 Git - fast, scalable, distributed revision control system
 =========================================================
 
