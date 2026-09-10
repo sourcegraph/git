@@ -88,12 +88,16 @@ pcre_prefix="$work/pcre2-install"
 	/usr/bin/make install
 )
 
+zlib_ng_prefix="$work/zlib-ng-install"
+MAKE=/usr/bin/make contrib/sourcegraph/packaging/build-zlib-ng.sh "$zlib_ng_prefix"
+
 (
 	cd "$work"
 	SOURCE_DATE_EPOCH=$(git -C "$root" show -s --format=%ct "$SOURCE_COMMIT") \
 	RECIPE_COMMIT="$RECIPE_COMMIT" \
 	PCRE2_PREFIX="$pcre_prefix" \
 	PCRE2_LICENSE="$work/pcre2-$PCRE2_VERSION/LICENCE.md" \
+	ZLIB_NG_PREFIX="$zlib_ng_prefix" \
 	SOURCE_BUILD_ROOT="$work" \
 	contrib/sourcegraph/packaging/build-from-source.sh darwin-arm64 "$output"
 )

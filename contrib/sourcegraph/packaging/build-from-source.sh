@@ -8,6 +8,7 @@ platform=${1:?usage: build-from-source.sh PLATFORM [OUTPUT]}
 output=${2:-/out}
 : "${RECIPE_COMMIT:?RECIPE_COMMIT is required}"
 : "${SOURCE_DATE_EPOCH:?SOURCE_DATE_EPOCH is required}"
+: "${ZLIB_NG_PREFIX:?ZLIB_NG_PREFIX is required}"
 
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT HUP INT TERM
@@ -15,7 +16,9 @@ trap 'rm -rf "$stage"' EXIT HUP INT TERM
 case "$platform" in
 	linux-amd64)
 		test "$(uname -s)-$(uname -m)" = Linux-x86_64
-		make_options='RUNTIME_PREFIX=YesPlease USE_LIBPCRE2=YesPlease INSTALL_STRIP=-s NO_INSTALL_HARDLINKS=YesPlease'
+		make_options="RUNTIME_PREFIX=YesPlease USE_LIBPCRE2=YesPlease \
+			ZLIB_NG=YesPlease ZLIB_NG_PATH=$ZLIB_NG_PREFIX \
+			INSTALL_STRIP=-s NO_INSTALL_HARDLINKS=YesPlease"
 		;;
 	darwin-arm64)
 		test "$(uname -s)-$(uname -m)" = Darwin-arm64
@@ -31,11 +34,21 @@ case "$platform" in
 		cp "$pcre_prefix/lib/libpcre2-8.a" "$static_pcre/lib/"
 		make_options="RUNTIME_PREFIX=YesPlease USE_LIBPCRE2=YesPlease \
 			LIBPCREDIR=$static_pcre ICONVDIR=/usr \
+			ZLIB_NG=YesPlease ZLIB_NG_PATH=$ZLIB_NG_PREFIX \
+			CC_LD_DYNPATH=-L \
 			INSTALL_STRIP=-s NO_GETTEXT=YesPlease NO_INSTALL_HARDLINKS=YesPlease \
 			USE_HOMEBREW_LIBICONV= NEEDS_GOOD_LIBICONV="
 		;;
 	*) echo "error: unsupported platform: $platform" >&2; exit 1 ;;
 esac
+test -f "$ZLIB_NG_PREFIX/include/zlib-ng.h"
+test -f "$ZLIB_NG_PREFIX/lib/libz-ng.a"
+test -f "$ZLIB_NG_PREFIX/LICENSE.md"
+test -f "$ZLIB_NG_PREFIX/SOURCE-INFO"
+. "$ZLIB_NG_PREFIX/SOURCE-INFO"
+: "${zlib_ng_version:?zlib_ng_version is required}"
+: "${zlib_ng_source_commit:?zlib_ng_source_commit is required}"
+: "${zlib_ng_source_sha256:?zlib_ng_source_sha256 is required}"
 
 prefix="$stage/git-sourcegraph"
 mkdir -p "$prefix" "$output"
@@ -56,6 +69,7 @@ $prefix/bin/git version --build-options |
 
 mkdir "$prefix/LICENSES"
 cp COPYING "$prefix/LICENSES/Git-COPYING"
+cp "$ZLIB_NG_PREFIX/LICENSE.md" "$prefix/LICENSES/Zlib-ng-LICENSE"
 
 if test "$platform" = darwin-arm64
 then
@@ -90,6 +104,9 @@ fi
 	echo "cc_version=$(cc --version | head -1)"
 	echo "rustc_version=$(rustc --version)"
 	echo "cargo_version=$(cargo --version)"
+	echo "zlib_ng_version=$zlib_ng_version"
+	echo "zlib_ng_source_commit=$zlib_ng_source_commit"
+	echo "zlib_ng_source_sha256=$zlib_ng_source_sha256"
 	if command -v dpkg-query >/dev/null 2>&1
 	then
 		echo 'builder_image=debian:12@sha256:6ebd97fa83deb272194a2cf015b3d26a4d538e9ad3a7a79d544c8af5b0a01443'

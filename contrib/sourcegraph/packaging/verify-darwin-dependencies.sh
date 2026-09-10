@@ -6,6 +6,8 @@ prefix=${1:?usage: verify-darwin-dependencies.sh PREFIX}
 : "${SOURCE_BUILD_ROOT:?SOURCE_BUILD_ROOT is required}"
 test -s "$prefix/LICENSES/Git-COPYING"
 test -s "$prefix/LICENSES/PCRE2-LICENCE"
+test -s "$prefix/LICENSES/Zlib-ng-LICENSE"
+"$prefix/bin/git" version --build-options | grep -Fx 'zlib-ng: 2.3.3'
 status_file=$(mktemp)
 trap 'rm -f "$status_file"' EXIT HUP INT TERM
 find "$prefix/bin" "$prefix/libexec" -type f -perm -111 | while IFS= read -r executable
@@ -28,6 +30,16 @@ do
 			echo "error: build path embedded in $executable: $build_path" >&2
 			echo failed >>"$status_file"
 		fi
+	done
+	otool -l "$executable" | awk '
+		$1 == "cmd" && $2 == "LC_RPATH" { found = 1; next }
+		found && $1 == "path" { print $2; found = 0 }
+	' | while IFS= read -r rpath
+	do
+		case "$rpath" in
+			/System/Library/*|/usr/lib/*) ;;
+			*) echo "error: non-system rpath in $executable: $rpath" >&2; echo failed >>"$status_file" ;;
+		esac
 	done
 	otool -L "$executable" | tail -n +2 | awk '{ print $1 }' | while IFS= read -r library
 	do

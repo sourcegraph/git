@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+zlib_ng_prefix="$HOME/.cache/sourcegraph-git/zlib-ng"
+
 packages='
 	apache2
 	cargo
+	curl
 	cvs
 	cvsps
 	default-jre
@@ -58,6 +61,28 @@ then
 else
 	echo "System packages are already installed."
 fi
+
+start=$SECONDS
+contrib/sourcegraph/packaging/build-zlib-ng.sh "$zlib_ng_prefix"
+echo "zlib-ng setup completed in $((SECONDS - start))s."
+
+# Keep subsequent plain `make` invocations on the same backend. config.mak is
+# intentionally ignored by Git and may also contain a developer's own flags.
+config_tmp=$(mktemp)
+trap 'rm -f "$config_tmp"' EXIT
+if test -f config.mak
+then
+	sed '/^# BEGIN orb zlib-ng$/,/^# END orb zlib-ng$/d' config.mak >"$config_tmp"
+fi
+{
+	cat "$config_tmp"
+	echo '# BEGIN orb zlib-ng'
+	echo 'ZLIB_NG = YesPlease'
+	printf 'ZLIB_NG_PATH = %s\n' "$zlib_ng_prefix"
+	echo '# END orb zlib-ng'
+} >config.mak
+rm -f "$config_tmp"
+trap - EXIT
 
 start=$SECONDS
 echo "Building Git..."
