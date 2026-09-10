@@ -85,13 +85,13 @@ jobs:
       - name: Validate archive
         run: |
           ./contrib/sourcegraph/packaging/validate-darwin-archive.sh \
-            artifacts/git-sourcegraph-v2.55.0-2-darwin-arm64.tar.gz
+            artifacts/git-sourcegraph-v2.55.0-3-darwin-arm64.tar.gz
       - uses: actions/upload-artifact@v6
         with:
-          name: git-sourcegraph-v2.55.0-2-darwin-arm64
+          name: git-sourcegraph-v2.55.0-3-darwin-arm64
           path: |
-            artifacts/git-sourcegraph-v2.55.0-2-darwin-arm64.tar.gz
-            artifacts/git-sourcegraph-v2.55.0-2-darwin-arm64.tar.gz.sha256
+            artifacts/git-sourcegraph-v2.55.0-3-darwin-arm64.tar.gz
+            artifacts/git-sourcegraph-v2.55.0-3-darwin-arm64.tar.gz.sha256
           if-no-files-found: error
           retention-days: 7
 
@@ -118,7 +118,7 @@ jobs:
             . contrib/sourcegraph/packaging/release.sh
             test "$SOURCE_TAG" = v2.55.0
             test "$SOURCE_COMMIT" = e9019fcafe0040228b8631c30f97ae1adb61bcdc
-            test "$RELEASE_VERSION" = v2.55.0-2
-            test "$GIT_VERSION" = 2.55.0.sourcegraph.2
+            test "$RELEASE_VERSION" = v2.55.0-3
+            test "$GIT_VERSION" = 2.55.0.sourcegraph.3
             grep -F 'FROM debian:12@sha256:' contrib/sourcegraph/packaging/Dockerfile.linux
           }
