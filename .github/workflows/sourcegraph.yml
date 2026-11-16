@@ -85,13 +85,13 @@ jobs:
       - name: Validate archive
         run: |
           ./contrib/sourcegraph/packaging/validate-darwin-archive.sh \
-            artifacts/git-sourcegraph-v2.55.0-3-darwin-arm64.tar.gz
+            artifacts/git-sourcegraph-v2.56.1-1-darwin-arm64.tar.gz
       - uses: actions/upload-artifact@v6
         with:
-          name: git-sourcegraph-v2.55.0-3-darwin-arm64
+          name: git-sourcegraph-v2.56.1-1-darwin-arm64
           path: |
-            artifacts/git-sourcegraph-v2.55.0-3-darwin-arm64.tar.gz
-            artifacts/git-sourcegraph-v2.55.0-3-darwin-arm64.tar.gz.sha256
+            artifacts/git-sourcegraph-v2.56.1-1-darwin-arm64.tar.gz
+            artifacts/git-sourcegraph-v2.56.1-1-darwin-arm64.tar.gz.sha256
           if-no-files-found: error
           retention-days: 7
 
@@ -105,9 +105,9 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Verify linear history and whitespace
         run: |
-          test "$(git rev-parse v2.55.0^{commit})" = e9019fcafe0040228b8631c30f97ae1adb61bcdc
-          test -z "$(git rev-list --merges v2.55.0..HEAD)"
-          git log --check v2.55.0..HEAD
+          test "$(git rev-parse v2.56.1^{commit})" = 03b41523c576f26ad34085378717a0c1b287470f
+          test -z "$(git rev-list --merges v2.56.1..HEAD)"
+          git log --check v2.56.1..HEAD
       - name: Verify packaging scripts and release identity
         run: |
           test ! -d contrib/sourcegraph/packaging || {
@@ -116,9 +116,9 @@ jobs:
               sh -n "$script"
             done
             . contrib/sourcegraph/packaging/release.sh
-            test "$SOURCE_TAG" = v2.55.0
-            test "$SOURCE_COMMIT" = e9019fcafe0040228b8631c30f97ae1adb61bcdc
-            test "$RELEASE_VERSION" = v2.55.0-3
-            test "$GIT_VERSION" = 2.55.0.sourcegraph.3
+            test "$SOURCE_TAG" = v2.56.1
+            test "$SOURCE_COMMIT" = 03b41523c576f26ad34085378717a0c1b287470f
+            test "$RELEASE_VERSION" = v2.56.1-1
+            test "$GIT_VERSION" = 2.56.1.sourcegraph.1
             grep -F 'FROM debian:12@sha256:' contrib/sourcegraph/packaging/Dockerfile.linux
           }

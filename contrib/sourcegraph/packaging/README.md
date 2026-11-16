@@ -2,18 +2,19 @@
 
 These scripts produce full, relocatable Git installations for Sourcegraph
 engineer Macs and Amp orbs. They do not change Git behavior. Both builders
-export the exact upstream-compatible `v2.55.0` source at commit
-`e9019fcafe0040228b8631c30f97ae1adb61bcdc`, regardless of the branch from
+export the exact upstream-compatible `v2.56.1` source at commit
+`03b41523c576f26ad34085378717a0c1b287470f`, regardless of the branch from
 which the packaging script runs.
 
-The next immutable downstream release is `sourcegraph/v2.55.0-3`, whose Git
-binary reports `2.55.0.sourcegraph.3`. It follows the stock-zlib
-`sourcegraph/v2.55.0-2` release and consists of exactly these files:
+The next immutable downstream release is `sourcegraph/v2.56.1-1`, whose Git
+binary reports `2.56.1.sourcegraph.1`. It rebases the downstream series from
+`sourcegraph/v2.55.0-3` onto upstream `v2.56.1` and consists of exactly these
+files:
 
-* `git-sourcegraph-v2.55.0-3-linux-amd64.tar.gz`
-* `git-sourcegraph-v2.55.0-3-linux-amd64.tar.gz.sha256`
-* `git-sourcegraph-v2.55.0-3-darwin-arm64.tar.gz`
-* `git-sourcegraph-v2.55.0-3-darwin-arm64.tar.gz.sha256`
+* `git-sourcegraph-v2.56.1-1-linux-amd64.tar.gz`
+* `git-sourcegraph-v2.56.1-1-linux-amd64.tar.gz.sha256`
+* `git-sourcegraph-v2.56.1-1-darwin-arm64.tar.gz`
+* `git-sourcegraph-v2.56.1-1-darwin-arm64.tar.gz.sha256`
 
 Existing downstream tags and assets remain immutable.
 
@@ -25,7 +26,7 @@ what was compiled; the recipe commit identifies the packaging implementation.
 Consumers should verify the checksum sidecar before extracting.
 
 `release.sh` is the source of truth for upstream version, release revision, Git
-version, and source identity. It currently pins upstream `v2.55.0` because this
+version, and source identity. It currently pins upstream `v2.56.1` because this
 experiment has no behavior patches. When a future Sourcegraph behavior patch
 lands, update the source ref and commit to the exact downstream revision
 containing that patch; never leave the builder exporting an older upstream
@@ -38,7 +39,7 @@ Install Docker, then run:
 ```console
 ./contrib/sourcegraph/packaging/build-linux.sh
 ./contrib/sourcegraph/packaging/validate-linux-archive.sh \
-  artifacts/git-sourcegraph-v2.55.0-3-linux-amd64.tar.gz
+  artifacts/git-sourcegraph-v2.56.1-1-linux-amd64.tar.gz
 ```
 
 The builder image starts from Debian 12 at a pinned multi-platform image
@@ -66,7 +67,7 @@ xcode-select --install # if the tools are not already installed
 brew install rust gnu-tar
 ./contrib/sourcegraph/packaging/build-darwin.sh
 ./contrib/sourcegraph/packaging/validate-darwin-archive.sh \
-  artifacts/git-sourcegraph-v2.55.0-3-darwin-arm64.tar.gz
+  artifacts/git-sourcegraph-v2.56.1-1-darwin-arm64.tar.gz
 ```
 
 The `Darwin ARM64 archive` job runs the same commands on GitHub's macOS 15

@@ -2,8 +2,8 @@
 
 `master` follows upstream Git. `sourcegraph` carries Sourcegraph changes as a
 linear patch series based on an upstream stable release tag. Target downstream
-pull requests there. The current experiment is based on upstream `v2.55.0`,
-commit `e9019fcafe0040228b8631c30f97ae1adb61bcdc`, and contains no Git behavior
+pull requests there. The current experiment is based on upstream `v2.56.1`,
+commit `03b41523c576f26ad34085378717a0c1b287470f`, and contains no Git behavior
 changes.
 
 Keep each downstream change as a small, rebasable commit with no merge commits.
